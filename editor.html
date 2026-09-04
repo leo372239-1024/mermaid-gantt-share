@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>甘特图代码 · 本地即时预览编辑器</title>
+<style>
+  :root{--bg:#f5f7fa;--card:#fff;--ink:#1f2937;--sub:#6b7280;--line:#e5e7eb;--brand:#2563eb;--soft:#eff6ff;--err:#dc2626}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--ink);height:100vh;display:flex;flex-direction:column}
+  header{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  header h1{font-size:16px}
+  header .actions{display:flex;gap:8px}
+  button{background:#fff;color:#1d4ed8;border:none;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{background:#f0f4fa}
+  button.primary{background:#f59e0b;color:#fff}
+  main{flex:1;display:grid;grid-template-columns:minmax(360px,42%) 1fr;gap:0;min-height:0}
+  .left{border-right:1px solid var(--line);display:flex;flex-direction:column;background:#fff}
+  .left .bar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--sub);background:#fafbfd}
+  textarea{flex:1;width:100%;border:none;outline:none;resize:none;padding:12px;font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:1.55;background:#fff}
+  .right{overflow:auto;padding:14px;background:var(--bg)}
+  .scroll{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 6px;overflow-x:auto;-webkit-overflow-scrolling:touch;min-height:200px}
+  .scroll svg{display:block;max-width:none;width:auto;min-width:640px}
+  .err{background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:10px;padding:10px 14px;font-size:12.5px;white-space:pre-wrap;margin:10px 0}
+  .ok{background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;border-radius:10px;padding:8px 14px;font-size:12.5px;margin:6px 0}
+  .placeholder{color:var(--sub);font-size:13px;text-align:center;margin-top:60px}
+  @media (max-width:820px){ main{grid-template-columns:1fr;grid-template-rows:45% 55%} .left{border-right:none;border-bottom:1px solid var(--line)} }
+</style>
+</head>
+<body>
+<header>
+  <h1>✏️ 甘特图编辑器（本地即时预览）</h1>
+  <div class="actions">
+    <button onclick="copyMd()">📋 复制为 gantt.md</button>
+    <button class="primary" onclick="downloadMd()">⬇️ 下载 gantt.md</button>
+  </div>
+</header>
+<main>
+  <div class="left">
+    <div class="bar"><span>左侧：粘贴/编辑 Mermaid 甘特代码（即改即渲染）</span><span id="status"></span></div>
+    <textarea id="src" spellcheck="false" placeholder="在此粘贴 mermaid gantt 代码…"></textarea>
+  </div>
+  <div class="right" id="preview"><div class="placeholder">在左侧输入代码即可实时预览<br><br>默认已载入示例甘特图</div></div>
+</main>
+
+<script src="./vendor/mermaid.min.js"></script>
+<script>
+  const SAMPLE = `gantt
+    dateFormat YYYY-MM-DD
+    title 课程大作业甘特图示例
+    axisFormat %m-%d
+    todayMarker stroke-width:2.5px,stroke:#ef4444,opacity:0.85
+
+    section 阶段一 · 启动
+        组队与选题          :done,    t1, 2026-09-01, 3d
+        需求确认            :active,  t2, 2026-09-04, 5d
+
+    section 阶段二 · 开发
+        方案设计            :         t3, after t2, 5d
+        前后端编码          :         t4, after t3, 15d
+        联调测试            :         t5, after t4, 6d
+
+    section 阶段三 · 交付
+        中期检查            :milestone, m1, 2026-10-20, 0d
+        文档与答辩准备      :         t6, after m1, 7d
+        最终答辩            :milestone, m2, 2026-11-15, 0d`;
+
+  const ta = document.getElementById('src');
+  const preview = document.getElementById('preview');
+  const status = document.getElementById('status');
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', gantt: { useMaxWidth: false } });
+  ta.value = SAMPLE;
+
+  let timer = null;
+  ta.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(render, 350); });
+  render();
+
+  async function render() {
+    preview.innerHTML = '';
+    status.textContent = '渲染中…';
+    try {
+      const { svg, bindFunctions } = await mermaid.render('editor' + Date.now(), ta.value);
+      const holder = document.createElement('div');
+      holder.innerHTML = svg;
+      const scroll = document.createElement('div');
+      scroll.className = 'scroll';
+      scroll.appendChild(holder);
+      preview.appendChild(scroll);
+      if (bindFunctions) bindFunctions(holder);
+      const ok = document.createElement('div');
+      ok.className = 'ok';
+      ok.textContent = '✅ 渲染成功 —— 红色竖线位置 = 今日（' + new Date().toLocaleDateString('zh-CN') + '），每日自动更新';
+      preview.insertBefore(ok, preview.firstChild);
+      status.textContent = '✓ 语法正确';
+      status.style.color = '#059669';
+    } catch (err) {
+      const e = document.createElement('div');
+      e.className = 'err';
+      e.textContent = '✗ 渲染失败，请检查语法：\n' + err.message;
+      preview.appendChild(e);
+      status.textContent = '✗ 有语法错误';
+      status.style.color = '#dc2626';
+    }
+  }
+
+  function mdTemplate() {
+    return '# 班级甘特图 · 数据源\n\n' +
+      '> 说明：渲染页只提取 ```mermaid 代码块，其余文字不影响线上页面；可粘贴多张图。\n\n' +
+      '```mermaid\n' + ta.value.trim() + '\n```\n';
+  }
+  async function copyMd() {
+    try { await navigator.clipboard.writeText(mdTemplate()); status.textContent = '✓ 已复制'; }
+    catch (e) {
+      const x = document.createElement('textarea'); x.value = mdTemplate(); document.body.appendChild(x);
+      x.select(); document.execCommand('copy'); x.remove(); status.textContent = '✓ 已复制';
+    }
+  }
+  function downloadMd() {
+    const blob = new Blob([mdTemplate()], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'gantt.md';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+</script>
+</body>
+</html>
