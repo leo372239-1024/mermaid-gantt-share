@@ -2,59 +2,54 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>班级甘特图</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>班级时间线甘特图 · 北交软工2026级专硕（2026.9–2028.7）</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="北交大2026级软件工程两年制专硕 · 入学到毕业时间线甘特图。支持年份/月份切换、回到今天、缩放；点击具体任务可查看班务执行说明（面向同学）。今日红色竖线随打开当天自动更新。">
 <style>
-  :root{--bg:#f5f7fa;--card:#fff;--ink:#1f2937;--sub:#6b7280;--line:#e5e7eb;--brand:#2563eb;--soft:#eff6ff}
+  :root{--bg:#f5f7fa;--ink:#1f2937}
   *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
   body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
-  header{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;padding:16px 18px}
-  header h1{font-size:18px;margin-bottom:2px}
-  header .sub{font-size:12px;opacity:.92}
-  header .today{font-size:12.5px;opacity:.95;margin-top:6px}
-  .wrap{max-width:1200px;margin:14px auto;padding:0 12px 40px}
-  .tip{background:var(--soft);border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#1e40af;margin-bottom:12px}
-  .legend{display:inline-block;margin-right:12px;font-size:12px;color:var(--sub)}
-  .legend .bar{display:inline-block;width:26px;height:3px;vertical-align:middle;margin-right:4px}
-  .scroll{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 6px;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:16px}
-  .diagram-title{font-size:13px;color:var(--sub);padding:2px 10px 6px}
-  .scroll svg{display:block;max-width:none;width:auto;min-width:640px}
-  .err{background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:10px;padding:10px 14px;font-size:13px;white-space:pre-wrap;margin-bottom:12px}
-  footer{font-size:11.5px;color:var(--sub);text-align:center;padding-bottom:20px}
-  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
+  header{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;padding:16px 18px calc(14px + env(safe-area-inset-top))}
+  header h1{font-size:18px;margin-bottom:3px;letter-spacing:.3px}
+  header .sub{font-size:12px;opacity:.94;line-height:1.6}
+  header .today{font-size:12.5px;opacity:.95;margin-top:7px;display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 12px}
+  .wrap{max-width:1200px;margin:6px auto 0;padding:0 10px 30px}
+  .tip{display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#92400e;margin:12px 0 0;line-height:1.7}
+  footer{font-size:11.5px;color:#6b7280;text-align:center;padding:6px 12px 22px;line-height:1.8}
+  footer code{background:#eef2f7;padding:1px 5px;border-radius:4px;font-size:11px}
 </style>
 </head>
 <body>
 <header>
-  <h1>📊 班级进度甘特图</h1>
-  <div class="sub">数据源：本仓库 gantt.md（电脑改代码 → git push → 自动更新）</div>
+  <h1>🗓 班级时间线甘特图</h1>
+  <div class="sub">北交大 2026 级软件工程两年制专硕 · 入学到毕业（2026.9 – 2028.7）<br>数据源：本仓库 <code style="color:#fff;background:rgba(255,255,255,.18);padding:0 5px;border-radius:4px">gantt.md</code>（电脑改代码 → 推送 → 页面自动更新）</div>
   <div class="today" id="todayInfo">加载中…</div>
 </header>
 
 <div class="wrap">
-  <div class="tip" id="notice">⚠️ 提示：现在展示的是<b>内置示例</b>（本地双击打开无法读取 gantt.md，属正常现象）。<b>正式内容请看班级群分享的线上链接</b> —— 线上每次打开都会读取最新 gantt.md 并自动渲染，<b>红色竖线 = 今日，位置随打开当天的日期自动更新，无需任何人工操作</b>。</div>
-
-  <div style="margin-bottom:10px">
-    <span class="legend"><span class="bar" style="background:#ef4444"></span>红色竖线 = 今日（自动更新）</span>
-    <span class="legend"><span class="bar" style="background:#64748b"></span>已完成任务</span>
-    <span class="legend"><span class="bar" style="background:#93c5fd"></span>进行中任务</span>
-    <span class="legend"><span class="bar" style="background:#e5e7eb"></span>未开始任务</span>
+  <div class="tip" id="notice">
+    ⚠️ 本地双击打开时无法读取 gantt.md（浏览器安全限制），当前展示内置示例。<br>
+    <b>正式内容请看班级群分享的线上链接</b> —— 线上每次打开自动读取最新 gantt.md 渲染。
   </div>
   <div id="wrap"></div>
 </div>
 
 <footer>
-  长按/双指可横向拖动查看整张图 ｜ 今日竖线由浏览器按打开当天自动计算
+  工具栏可 <b>切换年/月</b>、<b>📍 回到今天</b>、<b>＋/－ 缩放</b>　·　点任务条或左侧名称 → 查看班务执行详情<br>
+  红色竖线 = 今日，随<b>打开当天</b>自动更新，无需任何人工操作　·　编辑入口：本仓库 <code>editor.html</code>
 </footer>
 
-<script src="./vendor/mermaid.min.js"></script>
+<script src="./js/parser.js"></script>
+<script src="./js/events.js"></script>
+<script src="./js/viewer.js"></script>
 <script>
-  // 内置示例（当无法读取 gantt.md 时兜底展示，保证 file:// 双击也能看到效果）
+  // 内置示例（仅当无法读取 gantt.md 时兜底，保证 file:// 双击也能看到效果）
   const SAMPLE_GANTT = `gantt
     dateFormat YYYY-MM-DD
     title 课程大作业甘特图示例
     axisFormat %m-%d
-    todayMarker stroke-width:2.5px,stroke:#ef4444,opacity:0.85
 
     section 阶段一 · 启动
         组队与选题          :done,    t1, 2026-09-01, 3d
@@ -70,59 +65,45 @@
         文档与答辩准备      :         t6, after m1, 7d
         最终答辩            :milestone, m2, 2026-11-15, 0d`;
 
-  // 显示今日日期
+  // 头部今日日期
   const now = new Date();
   const week = ['日','一','二','三','四','五','六'][now.getDay()];
   document.getElementById('todayInfo').textContent =
-    '今天：' + now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 星期' + week +
-    '　|　红色竖线随打开当天自动更新';
+    '今天：' + now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日 星期' + week;
 
-  // 从 gantt.md 提取所有 ```mermaid 代码块
+  // 从 gantt.md 提取 ```mermaid 代码块（取第一块作为甘特数据源）
   const FENCE_RE = /```mermaid\s*\n([\s\S]*?)\n```/g;
-  async function loadBlocks() {
-    try {
-      const res = await fetch('./gantt.md', { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const md = await res.text();
-      const blocks = [];
-      let m;
-      while ((m = FENCE_RE.exec(md)) !== null) blocks.push(m[1].trim());
-      if (blocks.length === 0) throw new Error('未找到 ```mermaid 代码块');
-      document.getElementById('notice').style.display = 'none';
-      return blocks;
-    } catch (e) {
-      document.getElementById('notice').style.display = 'block';
-      return [SAMPLE_GANTT];
-    }
+  async function loadGanttCode() {
+    const res = await fetch('./gantt.md', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const md = await res.text();
+    const blocks = [];
+    let m;
+    while ((m = FENCE_RE.exec(md)) !== null) blocks.push(m[1].trim());
+    if (!blocks.length) throw new Error('未找到 ```mermaid 代码块');
+    return blocks[0];
   }
 
-  async function renderAll() {
-    const blocks = await loadBlocks();
-    const wrap = document.getElementById('wrap');
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', gantt: { useMaxWidth: false } });
-    for (let i = 0; i < blocks.length; i++) {
-      const card = document.createElement('div');
-      card.className = 'scroll';
-      const title = document.createElement('div');
-      title.className = 'diagram-title';
-      title.textContent = blocks.length > 1 ? '图 ' + (i + 1) + ' / ' + blocks.length : '';
-      card.appendChild(title);
-      wrap.appendChild(card);
-      try {
-        const { svg, bindFunctions } = await mermaid.render('gantt' + i, blocks[i]);
-        const holder = document.createElement('div');
-        holder.innerHTML = svg;
-        card.appendChild(holder);
-        if (bindFunctions) bindFunctions(holder);
-      } catch (err) {
-        const e = document.createElement('div');
-        e.className = 'err';
-        e.textContent = '第 ' + (i + 1) + ' 张图渲染失败，请检查 mermaid 语法：\n' + err.message;
-        card.appendChild(e);
-      }
+  (async function boot() {
+    let code;
+    try {
+      code = await loadGanttCode();
+    } catch (e) {
+      code = SAMPLE_GANTT;
+      document.getElementById('notice').style.display = 'block';
     }
-  }
-  renderAll();
+    const holder = document.getElementById('wrap');
+    if (window.GanttViewer && GanttViewer.mount) {
+      try {
+        GanttViewer.mount(holder, code, window.BJTU_EVENTS || {});
+      } catch (err) {
+        holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;white-space:pre-wrap">渲染出错：' +
+          String(err && err.message ? err.message : err).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</div>';
+      }
+    } else {
+      holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px">渲染模块加载失败，请刷新页面或检查网络。</div>';
+    }
+  })();
 </script>
 </body>
 </html>
