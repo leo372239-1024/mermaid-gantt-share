@@ -430,6 +430,12 @@
       function yOfTrack(k) { return AXIS_H + k * rowH; }
 
       var S = '';
+      /* 彩虹外框渐变（红橙黄绿青蓝紫），用于「开始日在今天±3天内且未结束」的事件/节点 */
+      S += '<defs><linearGradient id="gv-rainbow" x1="0" y1="0" x2="1" y2="0">' +
+        '<stop offset="0" stop-color="#ff4d4f"/><stop offset=".17" stop-color="#ff9f43"/>' +
+        '<stop offset=".33" stop-color="#ffd93d"/><stop offset=".5" stop-color="#46c35f"/>' +
+        '<stop offset=".67" stop-color="#2f9bff"/><stop offset=".83" stop-color="#7b5cff"/>' +
+        '<stop offset="1" stop-color="#d94dff"/></linearGradient></defs>';
 
       /* 月份网格 + 轴标签 */
       S += '<g>';
@@ -498,6 +504,12 @@
         var ord = tasksAll.indexOf(t);
         return PAL[((ord + 1) * 5) % PAL.length];
       }
+      /* 彩虹高亮命中：开始日期在「今天±3天」内 且 未结束（finish → 不亮） */
+      function isRainbow(t) {
+        if (statusOf(t, today) === 'finish') return false;
+        var ds = diffDays(today, dateOnly(t.start));
+        return ds >= -3 && ds <= 3;
+      }
 
       /* ---- 第一遍：普通时间条 ---- */
       tasksAll.forEach(function (t) {
@@ -518,9 +530,20 @@
         else { barFill = p[1]; barStroke = p[2]; inText = p[2]; }
         if (t.crit && p) barStroke = '#b91c1c';           /* crit：红圈强调 */
         var barY = cy - hBar / 2;
-        S += '<g class="gv-bar' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' +
-          '<rect x="' + x1.toFixed(1) + '" y="' + barY.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hBar.toFixed(1) + '" rx="' + Math.min(5, hBar / 2) + '" fill="' + barFill + '" stroke="' + (isFlash ? '#f59e0b' : barStroke) + '" stroke-width="' + (isFlash ? 2.5 : (t.crit ? 1.8 : 1)) + '"/></g>';
-        barRects.push({ x1: x1, y1: barY, x2: x1 + w, y2: barY + hBar });
+        var rb = isRainbow(t);
+        var strokeW = (isFlash ? 2.5 : (t.crit ? 1.8 : 1));
+        /* 彩虹命中 → 双层描边：底层同色描边 + 外层 3.5px 彩虹渐变描边+外发光（边缘向外扩展 3.5px） */
+        if (rb) {
+          var hh = Math.max(hBar + 7, 20);
+          S += '<g class="gv-bar gv-rb' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' +
+            '<rect x="' + (x1 - 1.75).toFixed(1) + '" y="' + (barY - 1.75).toFixed(1) + '" width="' + (w + 3.5).toFixed(1) + '" height="' + hh.toFixed(1) + '" rx="' + Math.min(6, hh / 2) + '" fill="none" stroke="url(#gv-rainbow)" stroke-width="3.5" opacity=".95"/>' +
+            '<rect x="' + x1.toFixed(1) + '" y="' + barY.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hBar.toFixed(1) + '" rx="' + Math.min(5, hBar / 2) + '" fill="' + barFill + '" stroke="' + barStroke + '" stroke-width="' + strokeW.toFixed(1) + '"/></g>';
+          barRects.push({ x1: x1 - 4, y1: barY - 4, x2: x1 + w + 4, y2: barY + hBar + 4 });
+        } else {
+          S += '<g class="gv-bar' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' +
+            '<rect x="' + x1.toFixed(1) + '" y="' + barY.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hBar.toFixed(1) + '" rx="' + Math.min(5, hBar / 2) + '" fill="' + barFill + '" stroke="' + barStroke + '" stroke-width="' + strokeW.toFixed(1) + '"/></g>';
+          barRects.push({ x1: x1, y1: barY, x2: x1 + w, y2: barY + hBar });
+        }
 
         /* 条内文字：统一「名称(日期)」形态 —— 宽条全名、中条截头保尾（尾部日期不可断） */
         var placedInBar = false;
@@ -557,13 +580,14 @@
         /* w<=24 或条内放不下：条尾外置「名称(日期)」必显标题 */
         if (!placedInBar) {
           var capOut = shortCaption(t, 999, 9.5);   /* 无限宽限 → 一定产出（含降级日期） */
-          if (capOut) placeText(x2 + 2, cy, capOut, 9.5, !p ? '#94a3b8' : p[2]);
+          if (capOut) placeText(x2 + 2, cy, capOut, 9.5, !p ? '#94a3b8' : p[2], true, true);
         }
       });
 
       /* ---- 外置文字放置器：右/左/上/下多档试位，撞条或撞字即跳过；
-       force=true 时若全档冲突则在首档强制绘制（保证标题必显，高密度时允许轻微压边） ---- */
-      function placeText(x, y, txt, fs, col, force) {
+             force=true 时若全档冲突，在本行 ±2 轨空白高度内扫描空位放置，并拉一条同色折线引回事件/节点；
+             高密度时标题也必显且不重叠（不再强制重叠硬画）。 ---- */
+      function placeText(x, y, txt, fs, col, force, leadTo) {
         var wT = estW(txt, fs);
         var tries = [
           { dx: 5, dy: 0, an: 'start' },
@@ -573,38 +597,60 @@
           { dx: 5, dy: rowH * 0.26, an: 'start' },
           { dx: -5, dy: rowH * 0.26, an: 'end' }
         ];
-        for (var ti = 0; ti < tries.length; ti++) {
+        function rectHit(ax1, ay1, ax2, ay2) {
+          if (ax1 < LEFT_PAD || ax2 > worldW - RIGHT_PAD) return true;
+          for (var bi = 0; bi < barRects.length; bi++) {
+            var b = barRects[bi];
+            if (rHit(ax1 - 2, ay1, ax2 + 2, ay2, b.x1, b.y1, b.x2, b.y2)) return true;
+          }
+          for (var li = 0; li < labelRects.length; li++) {
+            var lr = labelRects[li];
+            if (rHit(ax1 - 1, ay1, ax2 + 1, ay2, lr.x1, lr.y1, lr.x2, lr.y2)) return true;
+          }
+          return false;
+        }
+        var placed = false, fx = 0, fy = 0, fan = 'start';
+        for (var ti = 0; !placed && ti < tries.length; ti++) {
           var tr = tries[ti];
           var bx = (tr.an === 'start') ? (x + tr.dx) : (x + tr.dx - wT);
           var by0 = y + tr.dy;
-          var lx1 = bx, lx2 = bx + wT, ly1 = by0 - 7, ly2 = by0 + 4;
-          if (lx1 < LEFT_PAD || lx2 > worldW - RIGHT_PAD) continue;
-          var ok = true;
-          for (var bi = 0; ok && bi < barRects.length; bi++) {
-            var b = barRects[bi];
-            if (rHit(lx1 - 2, ly1, lx2 + 2, ly2, b.x1, b.y1, b.x2, b.y2)) ok = false;
-          }
-          for (var li = 0; ok && li < labelRects.length; li++) {
-            var lr = labelRects[li];
-            if (rHit(lx1 - 1, ly1, lx2 + 1, ly2, lr.x1, lr.y1, lr.x2, lr.y2)) ok = false;
-          }
-          if (ok) {
-            S += '<text x="' + bx.toFixed(1) + '" y="' + by0.toFixed(1) + '" text-anchor="' + tr.an + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
-            labelRects.push({ x1: lx1, y1: ly1, x2: lx2, y2: ly2 });
-            return true;
+          if (by0 - 7 < AXIS_H || by0 + 4 > totalH) continue;
+          if (bx < LEFT_PAD || bx + wT > worldW - RIGHT_PAD) continue;
+          if (!rectHit(bx - 2, by0 - 7, bx + wT + 2, by0 + 4)) {
+            placed = true; fx = bx; fy = by0; fan = tr.an; break;
           }
         }
-        /* 全档均撞 → force 时首档强制绘制（跳过碰撞） */
-        if (force) {
-          var fT = tries[0];
-          var fbx = (fT.an === 'start') ? (x + fT.dx) : (x + fT.dx - wT);
-          var fby = y + fT.dy;
-          if (fbx >= LEFT_PAD && fbx + wT <= worldW - RIGHT_PAD) {
-            S += '<text x="' + fbx.toFixed(1) + '" y="' + fby.toFixed(1) + '" text-anchor="' + fT.an + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
-            return true;
+        if (!placed && force) {
+          var step = Math.max(5, rowH * 0.22);
+          for (var ky = -rowH * 2; ky <= rowH * 2 + 0.01; ky += step) {
+            for (var dir = 0; dir < 2 && !placed; dir++) {
+              var cand = (dir === 0) ? (x + 5) : (x - 5 - wT);
+              var cly = y + ky;
+              if (cly - 7 < AXIS_H || cly + 4 > totalH) continue;
+              if (cand < LEFT_PAD || cand + wT > worldW - RIGHT_PAD) continue;
+              var an2 = (dir === 0) ? 'start' : 'end';
+              if (!rectHit(cand - 2, cly - 7, cand + wT + 2, cly + 4)) {
+                placed = true; fx = cand; fy = cly; fan = an2;
+              }
+            }
+            if (placed) break;
           }
         }
-        return false;
+        if (!placed) return false;
+
+        S += '<text x="' + fx.toFixed(1) + '" y="' + fy.toFixed(1) + '" text-anchor="' + fan + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
+        labelRects.push({ x1: (fan === 'start' ? fx : fx), y1: fy - 7, x2: (fan === 'start' ? fx + wT : fx + wT), y2: fy + 4 });
+
+        if (leadTo) {
+          var textEdge = (fan === 'start') ? fx : fx + wT;
+          var midX = (x + textEdge) / 2;
+          S += '<path d="M' + x.toFixed(1) + ',' + y.toFixed(1) +
+            ' L' + midX.toFixed(1) + ',' + y.toFixed(1) +
+            ' L' + midX.toFixed(1) + ',' + (fy - 1).toFixed(1) +
+            ' L' + textEdge.toFixed(1) + ',' + (fy - 1).toFixed(1) +
+            '" fill="none" stroke="' + col + '" stroke-width="1.15" opacity=".7"/>';
+        }
+        return true;
       }
 
       /* ---- 第二遍：里程碑/当日点（菱形+旁标）与过窄条外置名称标注 ---- */
@@ -621,13 +667,22 @@
         if (t.point || t.milestone) {
           var dCol = !p ? '#94a3b8' : ((st === 'going') ? p[0] : p[2]);
           var sz = Math.min(6.5, rowH * 0.22 + 3);
-          S += '<g class="gv-bar' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' +
-            '<path d="M' + x1.toFixed(1) + ',' + (cy - sz).toFixed(1) + ' L' + (x1 + sz).toFixed(1) + ',' + cy.toFixed(1) + ' L' + x1.toFixed(1) + ',' + (cy + sz).toFixed(1) + ' L' + (x1 - sz).toFixed(1) + ',' + cy.toFixed(1) + ' Z" fill="' + dCol + '" stroke="' + (isFlash ? '#f59e0b' : (t.crit ? '#b91c1c' : '#fff')) + '" stroke-width="' + (isFlash ? 2.5 : (t.crit ? 2 : 1)) + '"/></g>';
+          var rb = isRainbow(t);
+          var dStroke = (isFlash ? '#f59e0b' : (t.crit ? '#b91c1c' : '#fff'));
+          var dWid = (isFlash ? 2.5 : (t.crit ? 2 : 1));
+          var extra = '';
+          /* 彩虹命中 → 节点外加一圈同色彩虹渐变描边菱形（扩大 sz+3.5） */
+          if (rb) {
+            var sz2 = sz + 3.5;
+            extra = '<path d="M' + x1.toFixed(1) + ',' + (cy - sz2).toFixed(1) + ' L' + (x1 + sz2).toFixed(1) + ',' + cy.toFixed(1) + ' L' + x1.toFixed(1) + ',' + (cy + sz2).toFixed(1) + ' L' + (x1 - sz2).toFixed(1) + ',' + cy.toFixed(1) + ' Z" fill="none" stroke="url(#gv-rainbow)" stroke-width="3" opacity=".95"/>';
+          }
+          S += '<g class="gv-bar' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' + extra +
+            '<path d="M' + x1.toFixed(1) + ',' + (cy - sz).toFixed(1) + ' L' + (x1 + sz).toFixed(1) + ',' + cy.toFixed(1) + ' L' + x1.toFixed(1) + ',' + (cy + sz).toFixed(1) + ' L' + (x1 - sz).toFixed(1) + ',' + cy.toFixed(1) + ' Z" fill="' + dCol + '" stroke="' + dStroke + '" stroke-width="' + dWid + '"/></g>';
           barRects.push({ x1: x1 - sz - 2, y1: cy - sz - 2, x2: x1 + sz + 2, y2: cy + sz + 2 });
           /* 点旁名称标注：「名称(日期)」完整形态，撞条/撞字自动让位；过宽则降级截断，仍强制显示 */
           var capF = captionOf(t);
           if (estW(capF, 10.5) > 260) capF = shortCaption(t, 240, 10.5);
-          placeText(x1, cy, capF, 10.5, !p ? '#8b98a9' : p[2], true);
+          placeText(x1, cy, capF, 10.5, !p ? '#8b98a9' : p[2], true, true);
           return;
         }
         /* 过窄条（w<=24，已在第一遍放置条尾外置）→ 无需重复 */
