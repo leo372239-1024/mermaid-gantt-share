@@ -34,83 +34,97 @@
     ? require('./parser.js')
     : (G.GanttParser || {});
 
-  var CSS = String.raw `
-.gv-root{--gv-blue:#2563eb;--gv-ink:#1f2937;--gv-sub:#6b7280;--gv-line:#e5e7eb;
-  font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;color:var(--gv-ink);
-  --gv-rowh:30px}
+  var CSS = String.raw`
+.gv-root{--gv-blue:#4f46e5;--gv-blue-50:#eef2ff;--gv-blue-100:#e0e7ff;--gv-blue-700:#3730a3;
+  --gv-ink:#0f172a;--gv-body:#475569;--gv-sub:#64748b;--gv-line:#e2e8f0;--gv-line-soft:#f1f5f9;
+  --gv-card:#ffffff;--gv-radius:12px;
+  font-family:"Inter","Plus Jakarta Sans","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  color:var(--gv-ink);--gv-rowh:30px;line-height:1.6;background:#fafafa}
 .gv-root *{box-sizing:border-box}
-.gv-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff;border:1px solid var(--gv-line);
-  border-radius:10px;padding:8px;margin:10px 0 6px;position:sticky;top:0;z-index:30;box-shadow:0 2px 6px rgba(15,23,42,.06)}
-.gv-tbtn{appearance:none;border:1px solid #dbe3ef;background:#fff;color:#1e3a5f;border-radius:8px;
-  padding:5px 9px;font-size:13px;line-height:1.2;cursor:pointer;display:inline-flex;align-items:center;gap:3px;touch-action:manipulation}
-.gv-tbtn:hover{background:#eff6ff;border-color:#93c5fd}
-.gv-tbtn:active{transform:translateY(1px)}
-.gv-tbtn.primary{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;border-color:#1d4ed8;font-weight:600}
-.gv-tbtn.primary:hover{background:linear-gradient(135deg,#1e40af,#2563eb)}
-.gv-range{font-size:12px;color:var(--gv-sub);background:#f1f5f9;border-radius:6px;padding:4px 9px;white-space:nowrap}
-.gv-range b{color:#0f4c9c}
-.gv-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--gv-sub);margin:2px 2px 6px}
-.gv-legend i{display:inline-block;width:20px;height:3px;border-radius:2px;margin-right:4px;vertical-align:middle}
-.gv-legend i.dia{width:8px;height:8px;transform:rotate(45deg);border-radius:1px}
-.gv-legend i.today{width:2px;height:11px;background:#ef4444;margin-right:5px}
-.gv-body{display:flex;align-items:stretch;background:#fff;border:1px solid var(--gv-line);border-radius:10px;overflow:hidden}
+.gv-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--gv-card);
+  border:1px solid var(--gv-line);border-radius:14px;padding:10px 12px;margin:12px 0 8px;
+  position:sticky;top:0;z-index:30;
+  box-shadow:0 1px 2px rgba(15,23,42,.04),0 12px 28px -16px rgba(79,70,229,.14)}
+.gv-tbtn{appearance:none;border:1px solid #e2e8f0;background:#fff;color:#334155;border-radius:9px;
+  padding:6px 12px;font-size:13px;line-height:1.2;cursor:pointer;display:inline-flex;align-items:center;gap:4px;
+  touch-action:manipulation;transition:transform .3s,box-shadow .3s,background .3s,border-color .3s,color .3s;
+  box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.gv-tbtn:hover{transform:translateY(-1px);background:#f8fafc;border-color:#c7d2fe;color:#3730a3;
+  box-shadow:0 2px 6px rgba(79,70,229,.14)}
+.gv-tbtn:active{transform:translateY(0)}
+.gv-tbtn.primary{background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border-color:transparent;
+  font-weight:600;box-shadow:0 4px 14px -4px rgba(79,70,229,.45)}
+.gv-tbtn.primary:hover{transform:translateY(-1px);background:linear-gradient(135deg,#4338ca,#4f46e5);
+  border-color:transparent;color:#fff;box-shadow:0 8px 22px -6px rgba(79,70,229,.5)}
+.gv-range{font-size:12px;color:var(--gv-sub);background:#f8fafc;border:1px solid #eef1f6;border-radius:8px;
+  padding:5px 11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.gv-range b{color:var(--gv-blue-700);font-weight:600}
+.gv-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--gv-sub);margin:2px 4px 8px}
+.gv-legend i{display:inline-block;width:20px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.gv-legend i.dia{width:8px;height:8px;transform:rotate(45deg);border-radius:1.5px}
+.gv-legend i.today{width:2px;height:12px;background:#ef4444;margin-right:5px;border-radius:1px}
+.gv-legend .hint{opacity:.75}
+.gv-body{display:flex;align-items:stretch;background:var(--gv-card);border:1px solid var(--gv-line);
+  border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(15,23,42,.04),0 16px 40px -24px rgba(15,23,42,.1)}
 /* ---- 左侧事件索引列（与轨道行解耦，可折叠） ---- */
-.gv-labels{flex:0 0 auto;width:176px;border-right:2px solid #dbe3ef;background:#fff;position:relative;z-index:5;
-  display:flex;flex-direction:column;min-height:140px}
+.gv-labels{flex:0 0 auto;width:176px;border-right:1px solid var(--gv-line);background:#fff;
+  position:relative;z-index:5;display:flex;flex-direction:column;min-height:140px}
 .gv-labels.collapsed{width:34px;min-height:0}
-.gv-labels.collapsed .gv-lhead{flex-direction:column;gap:8px;padding:8px 2px;background:linear-gradient(180deg,#eef2ff,#f8faff)}
+.gv-labels.collapsed .gv-lhead{flex-direction:column;gap:8px;padding:8px 3px;background:#fafbff}
 .gv-labels.collapsed .gv-lhead .gv-lttl{display:none}
 .gv-labels.collapsed .gv-lbox{display:none}
-.gv-lhead{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:12px;font-weight:700;
-  color:#0f3b8f;background:linear-gradient(90deg,#e3ebff,#f2f6ff);border-bottom:1px solid #dbe3ef}
-.gv-lhead .cnt{color:#64748b;font-weight:600;font-size:11px;background:#fff;border:1px solid #dbe3ef;border-radius:999px;padding:0 7px}
-.gv-lttl{white-space:nowrap}
-.gv-chev{flex:0 0 auto;border:1px solid #c7d2fe;background:#fff;color:#3730a3;border-radius:7px;cursor:pointer;
-  font-size:12px;line-height:1;padding:4px 7px}
-.gv-chev:hover{background:#eef2ff}
+.gv-lhead{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:12px;font-weight:700;
+  color:#4338ca;background:linear-gradient(180deg,#f5f7ff,#fafbff);border-bottom:1px solid var(--gv-line-soft)}
+.gv-lhead .cnt{color:#64748b;font-weight:600;font-size:11px;background:#fff;border:1px solid #e2e8f0;
+  border-radius:999px;padding:0 8px}
+.gv-lttl{white-space:nowrap;letter-spacing:.2px}
+.gv-chev{flex:0 0 auto;border:1px solid #c7d2fe;background:#fff;color:#4f46e5;border-radius:8px;cursor:pointer;
+  font-size:12px;line-height:1;padding:5px 8px;transition:background .2s,transform .2s}
+.gv-chev:hover{background:#eef2ff;transform:translateY(-1px)}
 .gv-lbox{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding-bottom:4px}
-.gv-lsec{position:sticky;top:0;background:linear-gradient(90deg,#dfe9ff,#f2f6ff);color:#0f3b8f;font-weight:700;font-size:11px;
-  padding:4px 8px;z-index:2;border-bottom:1px solid #dbe3ef}
-.gv-lname{display:flex;align-items:flex-start;gap:5px;padding:5px 8px;cursor:pointer;font-size:11.5px;color:#374151;
-  border-bottom:1px solid #f4f6fa;line-height:1.5}
-.gv-lname:hover{background:#eaf2ff}
-.gv-lname.active{background:#dbeafe;color:#1e3a8a}
+.gv-lsec{position:sticky;top:0;background:linear-gradient(180deg,#eef2ff,#f5f7ff);color:#4338ca;font-weight:700;
+  font-size:11px;padding:5px 9px;z-index:2;border-bottom:1px solid var(--gv-line-soft);letter-spacing:.2px}
+.gv-lname{display:flex;align-items:flex-start;gap:5px;padding:6px 9px;cursor:pointer;font-size:11.5px;color:#334155;
+  border-bottom:1px solid #f8fafc;line-height:1.5;transition:background .15s}
+.gv-lname:hover{background:#f5f7ff}
+.gv-lname.active{background:#eef2ff;color:#4338ca}
 .gv-lname .dot{flex:0 0 auto;font-size:10px;line-height:1.6}
 .gv-lname .nm{flex:1 1 auto;min-width:0}
-.gv-lname .nm b{display:block;font-weight:600;color:#1f2937;font-size:11.5px;white-space:normal;word-break:break-all}
-.gv-lname .nm .dt{display:block;font-size:10px;color:#6b7280;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gv-lname .nm b{display:block;font-weight:600;color:#1e293b;font-size:11.5px;white-space:normal;word-break:break-all}
+.gv-lname .nm .dt{display:block;font-size:10px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* ---- 右侧滚动时间图 ---- */
 .gv-scroll{flex:1 1 auto;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;min-width:0}
 .gv-scroll svg{display:block}
-.gv-err{color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:12.5px;margin:10px 0 0;white-space:pre-wrap}
-.gv-warn{color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:10px 14px;font-size:12.5px;margin:10px 0 0;white-space:pre-wrap}
+.gv-err{color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:13px 16px;font-size:12.5px;margin:12px 0 0;white-space:pre-wrap}
+.gv-warn{color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:11px 16px;font-size:12.5px;margin:12px 0 0;white-space:pre-wrap}
 .gv-bar{cursor:pointer}
 .gv-flash{animation:gvFlash 1.2s ease-in-out 2}
 @keyframes gvFlash{0%,100%{opacity:1}50%{opacity:.3}}
 /* 详情抽屉 */
-.gv-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:60;opacity:0;transition:opacity .18s;pointer-events:none}
+.gv-mask{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:60;opacity:0;transition:opacity .18s;pointer-events:none;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
 .gv-mask.on{opacity:1;pointer-events:auto}
 .gv-drawer{position:fixed;left:0;right:0;bottom:0;max-height:84vh;overflow-y:auto;background:#fff;z-index:61;
-  border-radius:16px 16px 0 0;padding:14px 18px calc(18px + env(safe-area-inset-bottom));
-  transform:translateY(102%);transition:transform .22s cubic-bezier(.2,.8,.25,1);box-shadow:0 -8px 30px rgba(15,23,42,.2)}
+  border-radius:18px 18px 0 0;padding:14px 20px calc(18px + env(safe-area-inset-bottom));
+  transform:translateY(102%);transition:transform .22s cubic-bezier(.2,.8,.25,1);box-shadow:0 -16px 48px -12px rgba(15,23,42,.25)}
 .gv-drawer.on{transform:translateY(0)}
-.gv-drawer .grab{width:44px;height:4px;border-radius:2px;background:#d1d5db;margin:0 auto 12px}
-.gv-dhead{font-size:17px;font-weight:700;color:#0f172a;margin:2px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.gv-dsub{font-size:12px;color:var(--gv-sub);margin-bottom:12px}
-.gv-chip{display:inline-block;font-size:11px;border-radius:999px;padding:2px 9px;font-weight:600;margin:0 5px 4px 0}
-.gv-chip.c1{background:#fef3c7;color:#92400e}.gv-chip.c2{background:#dcfce7;color:#166534}
-.gv-chip.c3{background:#fee2e2;color:#991b1b}.gv-chip.c4{background:#e0e7ff;color:#3730a3}
-.gv-drow{display:flex;gap:10px;padding:8px 0;border-top:1px solid #f1f5f9;font-size:13px}
+.gv-drawer .grab{width:44px;height:4px;border-radius:2px;background:#e2e8f0;margin:0 auto 12px}
+.gv-dhead{font-size:18px;font-weight:700;color:#0f172a;margin:2px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.3}
+.gv-dsub{font-size:12px;color:var(--gv-sub);margin-bottom:12px;line-height:1.8}
+.gv-chip{display:inline-block;font-size:11px;border-radius:999px;padding:2px 10px;font-weight:600;margin:0 5px 4px 0}
+.gv-chip.c1{background:#fffbeb;color:#92400e}.gv-chip.c2{background:#ecfdf5;color:#065f46}
+.gv-chip.c3{background:#fef2f2;color:#991b1b}.gv-chip.c4{background:#eef2ff;color:#4338ca}
+.gv-drow{display:flex;gap:10px;padding:9px 0;border-top:1px solid #f1f5f9;font-size:13px}
 .gv-drow .k{flex:0 0 80px;color:var(--gv-sub);font-size:12px;padding-top:2px}
-.gv-drow .v{flex:1 1 auto;color:#111827;line-height:1.65;word-break:break-word}
+.gv-drow .v{flex:1 1 auto;color:#1e293b;line-height:1.7;word-break:break-word}
 .gv-steps{margin:2px 0;padding:0;list-style:none}
 .gv-steps li{padding:2px 0 2px 18px;position:relative}
-.gv-steps li::before{content:"";position:absolute;left:3px;top:11px;width:6px;height:6px;border-radius:50%;background:#3b82f6}
-.gv-owner{display:inline-block;background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:999px;
-  font-size:11.5px;padding:2px 9px;margin:2px 4px 0 0}
-.gv-close{position:sticky;top:0;float:right;border:none;background:#f3f4f6;width:30px;height:30px;border-radius:50%;
-  cursor:pointer;font-size:15px;color:#4b5563}
-.gv-close:hover{background:#e5e7eb}
+.gv-steps li::before{content:"";position:absolute;left:3px;top:11px;width:6px;height:6px;border-radius:50%;background:#6366f1}
+.gv-owner{display:inline-block;background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:999px;
+  font-size:11.5px;padding:2px 10px;margin:2px 4px 0 0}
+.gv-close{position:sticky;top:0;float:right;border:none;background:#f1f5f9;width:32px;height:32px;border-radius:50%;
+  cursor:pointer;font-size:15px;color:#475569;transition:background .2s,transform .2s}
+.gv-close:hover{background:#e2e8f0;transform:rotate(90deg)}
 /* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转）。
        此处只做布局微调：左列高度收紧；.gv-scroll 保留原生横向滚动（时间轴），但不再拦截触摸事件，
        与页面共享手势——纵向拖拽自然冒泡到 body 翻页，横向拖拽滚时间轴（浏览器自动分工） ---- */
@@ -123,6 +137,8 @@
   .gv-labels{width:150px}.gv-lhead{font-size:11px;padding:5px 6px}
   .gv-lname{padding:4px 6px;font-size:11px}
   .gv-lname .nm b{font-size:11px}
+  .gv-toolbar{padding:8px 9px;gap:6px}
+  .gv-tbtn{padding:5px 9px;font-size:12px}
 }
 `;
 
@@ -162,7 +178,7 @@
   /* 事件错色色板：[0]=实色(已到/进行,白字) [1]=浅色(未开始,深字) [2]=墨色(描边/浅底文字)；
      已完成任务统一灰色。序号步长 5 循环 → 相邻事件颜色差异大，便于区分 */
   var PAL = [
-    ['#1d4ed8', '#bfdbfe', '#1e40af'],
+    ['#4f46e5', '#c7d2fe', '#3730a3'],
     ['#7c3aed', '#ddd6fe', '#6d28d9'],
     ['#0e7490', '#a5f3fc', '#155e75'],
     ['#047857', '#a7f3d0', '#065f46'],
@@ -275,13 +291,13 @@
       '<div class="gv-toolbar">' +
       '  <button class="gv-tbtn" data-act="zoomout" title="缩小">－ 缩小</button>' +
       '  <button class="gv-tbtn" data-act="zoomin" title="放大">＋ 放大</button>' +
-      '  <span style="width:2px;height:16px;background:#e5e7eb;display:inline-block"></span>' +
+      '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn" data-act="prevYear" title="上一学年">‹‹ 上年</button>' +
       '  <button class="gv-tbtn" data-act="prevMonth" title="上一月">‹ 上月</button>' +
       '  <span class="gv-range"><b id="gv-cen">—</b></span>' +
       '  <button class="gv-tbtn" data-act="nextMonth" title="下一月">下月 ›</button>' +
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
-      '  <span style="width:2px;height:16px;background:#e5e7eb;display:inline-block"></span>' +
+      '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
@@ -317,8 +333,9 @@
     /* ---- 图例 ---- */
     legendEl.innerHTML =
       '<span><i class="today"></i>今日线(随打开自动更新)</span>' +
+      '<span><i style="background:#ef4444;border-radius:2px"></i>近3天开始·未结束(红色高亮)</span>' +
       '<span><i style="background:#cbd5e1"></i>已完成</span>' +
-      '<span><i style="background:#1d4ed8"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#b45309"></i>不同事件/节点错色区分</span>' +
+      '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#b45309"></i>不同事件/节点错色区分</span>' +
       '<span><i class="dia" style="background:#7c3aed"></i>里程碑/当日</span>' +
       '<span><i style="border:1.5px dashed #dc2626;background:transparent;height:4px;width:16px;border-radius:2px"></i>关键节点(红圈)</span>' +
       '<span class="hint">🖱 点条/◆/左侧名 → 班务详情 · 桌面 Ctrl+滚轮缩放</span>';
@@ -430,12 +447,10 @@
       function yOfTrack(k) { return AXIS_H + k * rowH; }
 
       var S = '';
-      /* 彩虹外框渐变（红橙黄绿青蓝紫），用于「开始日在今天±3天内且未结束」的事件/节点 */
+      /* 近期事件高亮渐变（与今日竖线同色 #ef4444 红），用于「开始日在今天±3天内且未结束」的事件/节点 */
       S += '<defs><linearGradient id="gv-rainbow" x1="0" y1="0" x2="1" y2="0">' +
-        '<stop offset="0" stop-color="#ff4d4f"/><stop offset=".17" stop-color="#ff9f43"/>' +
-        '<stop offset=".33" stop-color="#ffd93d"/><stop offset=".5" stop-color="#46c35f"/>' +
-        '<stop offset=".67" stop-color="#2f9bff"/><stop offset=".83" stop-color="#7b5cff"/>' +
-        '<stop offset="1" stop-color="#d94dff"/></linearGradient></defs>';
+        '<stop offset="0" stop-color="#e11d48"/><stop offset=".5" stop-color="#ef4444"/>' +
+        '<stop offset="1" stop-color="#f87171"/></linearGradient></defs>';
 
       /* 月份网格 + 轴标签 */
       S += '<g>';
@@ -532,7 +547,7 @@
         var barY = cy - hBar / 2;
         var rb = isRainbow(t);
         var strokeW = (isFlash ? 2.5 : (t.crit ? 1.8 : 1));
-        /* 彩虹命中 → 双层描边：底层同色描边 + 外层 3.5px 彩虹渐变描边+外发光（边缘向外扩展 3.5px） */
+        /* 近期命中 → 双层描边：底层同色描边 + 外层 3.5px 红色渐变描边（与今日线同色，边缘向外扩展 3.5px） */
         if (rb) {
           var hh = Math.max(hBar + 7, 20);
           S += '<g class="gv-bar gv-rb' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' +
@@ -671,7 +686,7 @@
           var dStroke = (isFlash ? '#f59e0b' : (t.crit ? '#b91c1c' : '#fff'));
           var dWid = (isFlash ? 2.5 : (t.crit ? 2 : 1));
           var extra = '';
-          /* 彩虹命中 → 节点外加一圈同色彩虹渐变描边菱形（扩大 sz+3.5） */
+          /* 近期命中 → 节点外加一圈同色红渐变描边菱形（扩大 sz+3.5，与今日线同色） */
           if (rb) {
             var sz2 = sz + 3.5;
             extra = '<path d="M' + x1.toFixed(1) + ',' + (cy - sz2).toFixed(1) + ' L' + (x1 + sz2).toFixed(1) + ',' + cy.toFixed(1) + ' L' + x1.toFixed(1) + ',' + (cy + sz2).toFixed(1) + ' L' + (x1 - sz2).toFixed(1) + ',' + cy.toFixed(1) + ' Z" fill="none" stroke="url(#gv-rainbow)" stroke-width="3" opacity=".95"/>';

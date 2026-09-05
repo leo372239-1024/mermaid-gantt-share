@@ -6,25 +6,77 @@
 <title>读研甘特图（软件2603班专属） · 北交软工2026级专硕</title>
 <link rel="icon" href="data:,">
 <meta name="description" content="读研甘特图（软件2603班专属）：北交大2026级软件工程两年制专硕入学到毕业时间线。支持年/月切换、回到今天、缩放（桌面 Ctrl+滚轮）；点击任务可查看班务执行说明（面向同学）。今日红色竖线随打开当天自动更新。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#f5f7fa;--ink:#1f2937}
+  :root{
+    --bg:#fafafa;
+    --ink:#0f172a;
+    --body:#475569;
+    --sub:#64748b;
+    --line:#e2e8f0;
+    --line-soft:#f1f5f9;
+    --primary:#4f46e5;
+    --primary-600:#4338ca;
+    --primary-100:#e0e7ff;
+    --primary-50:#eef2ff;
+    --card:#ffffff;
+    --radius:16px;
+  }
   *{box-sizing:border-box;margin:0;padding:0}
   html{-webkit-text-size-adjust:100%}
-  body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
-  header{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;padding:10px 16px calc(12px + env(safe-area-inset-top))}
-  header .hdr-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  header .today{font-size:12.5px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.18);border-radius:999px;padding:4px 12px;white-space:nowrap}
-  header .hdr-btn{appearance:none;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;
-    padding:4px 11px;font-size:12px;cursor:pointer;line-height:1.3;white-space:nowrap}
-  header .hdr-btn:hover{background:rgba(255,255,255,.28)}
-  header .hdr-detail{margin-top:8px}
+  body{
+    font-family:"Inter","Plus Jakarta Sans","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ---- 顶部 Header：白卡片浮在灰底上，Indigo 主色渐变标题区 ---- */
+  header{
+    background:var(--card);
+    border-bottom:1px solid var(--line-soft);
+    color:var(--ink);
+    padding:14px 20px calc(14px + env(safe-area-inset-top));
+    position:sticky;top:0;z-index:40;
+    box-shadow:0 1px 2px rgba(15,23,42,.03),0 12px 32px -20px rgba(15,23,42,.12);
+  }
+  header .hdr-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:1280px;margin:0 auto}
+  header .today{
+    font-size:12.5px;display:inline-flex;align-items:center;gap:7px;
+    background:var(--primary-50);border:1px solid var(--primary-100);
+    color:var(--primary-600);border-radius:999px;padding:6px 14px;white-space:nowrap;font-weight:600;
+    font-variant-numeric:tabular-nums;
+  }
+  header .hdr-btn{
+    appearance:none;border:1px solid var(--line);background:#fff;color:#334155;border-radius:999px;
+    padding:6px 14px;font-size:12.5px;cursor:pointer;line-height:1.3;white-space:nowrap;font-weight:500;
+    box-shadow:0 1px 2px rgba(15,23,42,.05);
+    transition:transform .3s,box-shadow .3s,background .3s,border-color .3s,color .3s;
+  }
+  header .hdr-btn:hover{transform:translateY(-1px);background:#f8fafc;border-color:var(--primary-100);color:var(--primary-600);box-shadow:0 4px 12px -2px rgba(79,70,229,.18)}
+  header .hdr-btn:active{transform:translateY(0)}
+  header .hdr-detail{margin-top:12px;max-width:1280px;margin-left:auto;margin-right:auto}
   header.collapsed .hdr-detail{display:none}
-  header h1{font-size:18px;margin-bottom:3px;letter-spacing:.3px}
-  header .sub{font-size:12px;opacity:.94;line-height:1.6}
-  .wrap{max-width:1200px;margin:6px auto 0;padding:0 10px 30px}
-  .tip{display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#92400e;margin:12px 0 0;line-height:1.7}
-  footer{font-size:11.5px;color:#6b7280;text-align:center;padding:6px 12px 22px;line-height:1.8}
-  footer code{background:#eef2f7;padding:1px 5px;border-radius:4px;font-size:11px}
+  header h1{
+    font-size:clamp(20px,3vw,26px);font-weight:700;margin-bottom:6px;letter-spacing:.2px;line-height:1.25;
+    background:linear-gradient(120deg,#1e1b4b,#4338ca);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+  }
+  header .sub{font-size:13px;color:var(--body);line-height:1.75}
+  header .sub code{background:var(--primary-50);border:1px solid var(--primary-100);color:var(--primary-600);padding:1px 7px;border-radius:6px;font-size:12px}
+  /* ---- 主体内容 ---- */
+  .wrap{max-width:1280px;margin:0 auto;padding:16px 16px 36px}
+  .tip{
+    display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:12px 16px;
+    font-size:12.5px;color:#92400e;margin:14px 0 0;line-height:1.7;
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
+  }
+  footer{
+    font-size:12px;color:var(--sub);text-align:center;padding:14px 16px 30px;line-height:1.9;
+    border-top:1px solid var(--line-soft);margin-top:8px;
+  }
+  footer b{color:#334155}
+  footer code{background:#f1f5f9;border:1px solid #e2e8f0;padding:1px 6px;border-radius:5px;font-size:11px;color:#475569}
   /* ---- 整页向右旋转 90°（右上角 ⇄ 按钮 / 手机横屏自动）：header + 甘特图 + footer 全部旋转 ---- */
   /* 旋转画布：body 只负责旋转 + 固定；
      内部再包一层 .page-scroll 作为滚动容器（普通块级 overflow-y:auto），
@@ -32,8 +84,8 @@
   html.page-land, html.page-land body{overflow:hidden}
   html.page-land body{
     position:fixed;top:0;left:0;
-    width:100vh;      /* 旋转后视觉高度 = 视口高 */
-    height:100vw;     /* 旋转后视觉宽度 = 视口宽 */
+    width:100vh;      /* 旋转后视觉高度 = 视口宽 */
+    height:100vw;     /* 旋转后视觉宽度 = 视口高 */
     transform:rotate(90deg) translateY(-100%);
     transform-origin:top left;
   }
@@ -41,7 +93,8 @@
     height:100%;overflow-x:hidden;overflow-y:auto;
     -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   }
-  html.page-land .wrap{max-width:none;margin:0;padding:0 10px 30px}
+  html.page-land .wrap{max-width:none;margin:0;padding:0 12px 28px}
+  html.page-land header{position:static}
 </style>
 </head>
 <body>
@@ -55,7 +108,7 @@
   </div>
   <div class="hdr-detail">
     <h1>读研甘特图（软件2603班专属）</h1>
-    <div class="sub">北交大 2026 级软件工程两年制专硕 · 入学到毕业（2026.9 – 2028.7）<br>数据源：本仓库 <code style="color:#fff;background:rgba(255,255,255,.18);padding:0 5px;border-radius:4px">gantt.md</code>（电脑改代码 → 推送 → 页面自动更新）</div>
+    <div class="sub">北交大 2026 级软件工程两年制专硕 · 入学到毕业（2026.9 – 2028.7）<br>数据源：本仓库 <code>gantt.md</code>（电脑改代码 → 推送 → 页面自动更新）</div>
   </div>
 </header>
 
@@ -159,11 +212,11 @@
           applyPageLand();
         }
       } catch (err) {
-        holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;white-space:pre-wrap">渲染出错：' +
+        holder.innerHTML = '<div style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:13px 16px;font-size:13px;white-space:pre-wrap">渲染出错：' +
           String(err && err.message ? err.message : err).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</div>';
       }
     } else {
-      holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px">渲染模块加载失败，请刷新页面或检查网络。</div>';
+      holder.innerHTML = '<div style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:13px 16px;font-size:13px">渲染模块加载失败，请刷新页面或检查网络。</div>';
     }
   })();
 
