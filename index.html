@@ -32,6 +32,7 @@
   <div class="hdr-top">
     <div class="today" id="todayInfo">加载中…</div>
     <span style="flex:1"></span>
+    <button class="hdr-btn" id="viewToggle" title="切换显示视图：常规视图 / 向右旋转90° 横屏视图">⇄ 横屏视图</button>
     <button class="hdr-btn" id="hdrToggle" title="折叠/展开顶部说明">▾ 展开</button>
   </div>
   <div class="hdr-detail">
@@ -49,9 +50,17 @@
 </div>
 
 <footer>
-  工具栏可 <b>切换年/月</b>、<b>📍 回到今天</b>、<b>＋/－ 或 Ctrl+滚轮(桌面) 缩放</b>　·　<b>点任务条/◆ 节点/左侧名称</b> → 查看事件详情<br>
-  事件按时间自动紧凑排布（互不重叠的任务可同一行）　·　手机横屏自动旋转为纵向时间线<br>
-  红色竖线 = 今日，随<b>打开当天</b>自动更新　·　编辑入口：本仓库 <code>editor.html</code>
+  <div style="max-width:760px;margin:0 auto;text-align:left">
+    <b>📖 操作说明（面向同学）</b>
+    <div style="margin-top:4px">
+      ① <b>换时间</b>：工具栏 ‹‹上‹年 / ‹‹上‹月 / 下月 › / 下‹年 ››，或 <b>📍 回到今天</b> 一键回到当前日期<br>
+      ② <b>缩放</b>：工具栏 ＋放大 / －缩小；桌面也可 <b>Ctrl+滚轮</b>（手机双指捏合缩放）<br>
+      ③ <b>看详情</b>：点击 <b>任务条 / ◆ 节点 / 左侧名称</b> 弹出该事件执行说明（班务、负责人、时间地点、步骤提醒）<br>
+      ④ <b>视图</b>：右上角 <b>⇄ 横屏视图</b> 切换 横向时间线 ↔ 向右旋转 90°（手机横着看更清晰）；手机横屏时自动切换<br>
+      ⑤ <b>定位</b>：点击左侧事件名称 → 自动滚动到该事件日期并高亮闪烁<br>
+      红色竖线 = 今日，随<b>打开当天</b>自动更新，无需任何操作
+    </div>
+  </div>
 </footer>
 
 <script src="./js/parser.js"></script>
@@ -121,7 +130,7 @@
     const holder = document.getElementById('wrap');
     if (window.GanttViewer && GanttViewer.mount) {
       try {
-        GanttViewer.mount(holder, code, window.BJTU_EVENTS || {});
+        gvViewer = GanttViewer.mount(holder, code, window.BJTU_EVENTS || {});
       } catch (err) {
         holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;white-space:pre-wrap">渲染出错：' +
           String(err && err.message ? err.message : err).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</div>';
@@ -130,6 +139,30 @@
       holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px">渲染模块加载失败，请刷新页面或检查网络。</div>';
     }
   })();
+
+  // 右上角：视图切换（常规 ⇄ 向右旋转90° 横屏）—— 绑定在 boot() 内，mount 拿到 viewer 后接线
+  const viewToggle = document.getElementById('viewToggle');
+  // 在 boot 内赋值（viewer 挂到作用域外）
+  let gvViewer = null;
+  function bindViewToggle() {
+    viewToggle.addEventListener('click', function () {
+      if (!gvViewer || !gvViewer.setViewMode) {
+        viewToggle.textContent = '⇄ 加载中';
+        return;
+      }
+      const cur = gvViewer.getViewMode();
+      if (cur === 'land') {
+        gvViewer.setViewMode('normal');
+        viewToggle.textContent = '⇄ 横屏视图';
+        viewToggle.title = '切换显示视图：常规视图 / 向右旋转90° 横屏视图';
+      } else {
+        gvViewer.setViewMode('land');
+        viewToggle.textContent = '⇄ 常规视图';
+        viewToggle.title = '切换显示视图：恢复常规横向时间线';
+      }
+    });
+  }
+  bindViewToggle();
 </script>
 </body>
 </html>

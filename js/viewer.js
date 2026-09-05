@@ -13,8 +13,10 @@
  *     触屏纵向滑动 / 滚轮 映射为时间滚动；桌面保持常规横向视图
  *
  *  9) 桌面 Ctrl+滚轮 缩放显示日期范围（夹紧在数据全跨度内）
- * 10) 时间轴天刻度：逐日细网格 + 仅奇数天数字刻度（随缩放自动取舍）
- * 11) 事件按序号错色配色（已完成统一灰）；条内/点旁标注「名称(日期)」防重叠
+ * 10) 时间轴天刻度：逐日细网格 + 【每一天】数字刻度（随缩放自动取舍）
+ * 11) 事件按序号错色配色（已完成统一灰）；条内/点旁标注「名称(日期)」防重叠；
+ *     条内放不下时自动降级并条尾外置（强制显示标题）
+ * 12) 视图切换：常规视图 ⇄ 向右旋转90° 横屏视图（右上角按钮手动切换；手机横屏仍自动）
  *
  * 用法：GanttViewer.mount(containerEl, ganttCode, eventsData)
  */
@@ -195,7 +197,9 @@
     }
     return w;
   }
-  /* 条/节点内标注重排：优先保留括号日期注记，只截断头部名称（防文字重叠遮盖） */
+  /* 条/节点内标注重排：优先保留括号日期注记，只截断头部名称（防文字重叠遮盖）。
+     注：超长注记（如「新生体检(9.5至9.7工作时间,交体检表至9.7)」）整体优先采用，
+     实在放不下再降级为纯日期「(9.5至9.7)」，仍放不下才返回空（由调用方外置） */
   function shortCaption(t, limit, fs) {
     var n = t.name || '';
     var i = String(n).search(/[(\uFF08]/);
@@ -208,7 +212,16 @@
     }
     if (!head && !tail) return '';
     var wTail = estW(tail, fs);
-    if (wTail > limit - 2) return '';                  /* 注记本身放不下 → 放弃 */
+    if (wTail > limit - 2) {
+      /* 降级：注记过长 → 只保留日期「(9.5至9.7)」或当日「9.5」 */
+      var r2 = rangeCN(t);
+      var tail2 = '';
+      if (t.point || t.milestone) tail2 = r2 ? r2 : '';
+      else tail2 = r2 ? '（' + r2 + '）' : '';
+      var wTail2 = tail2 ? estW(tail2, fs) : 0;
+      if (wTail2 <= limit - 2) { tail = tail2; wTail = wTail2; }
+      else return '';   /* 纯日期也放不下 → 交调用方外置/放弃 */
+    }
     var out = '', w = 0, maxH = limit - 2 - wTail;
     for (var k = 0; k < head.length; k++) {
       var cw = (head.charCodeAt(k) >= 0x2E80) ? fs : fs * 0.55;
@@ -352,7 +365,11 @@
     var LEFT_PAD = 12, RIGHT_PAD = 30;
     var AXIS_H = 26;
     var isMobile = window.innerWidth <= 700;
-    var isLand = window.innerWidth > window.innerHeight && window.innerWidth <= 1024 && window.innerHeight <= 760;
+    var autoLand = window.innerWidth > window.innerHeight && window.innerWidth <= 1024 && window.innerHeight <= 760;
+    /* 手动视图覆盖：null=自动（桌面常规/手机横屏自动旋转）；'land'=强制向右旋转90°；'normal'=强制常规 */
+    var viewOverride = null;
+    function effLand() { return viewOverride === 'land' ? true : (viewOverride === 'normal' ? false : autoLand); }
+    var isLand = effLand();
     var viewDays = isLand ? 90 : (isMobile ? 80 : 110); // 视口覆盖天数
     var MIN_VIEW = 10, MAX_VIEW = Math.max(totalDays * 1.02, 400);
 
@@ -431,24 +448,24 @@
           lastLabelX = xm;
         }
       }
-      /* 天刻度：逐日细网格 + 仅奇数天数字刻度（随缩放自动取舍；避开月份/今日文字） */
+      /* 天刻度：逐日细网格 + 【每一天】数字刻度（px 足够时全部显示，随缩放自动取舍；避开月份/今日文字） */
       var todayX = hasTodayInRange ? xOf(today) : -9999;
       if (px >= 6) {
         for (var di = 0; di <= totalDays; di++) {
           var ddx = LEFT_PAD + di * px;
           S += '<line x1="' + ddx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + ddx.toFixed(1) + '" y2="' + totalH + '" stroke="#f6f8fb" stroke-width="1"/>';
         }
-        if (px >= 9) {
+        if (px >= 10.5) {
+          /* 每一天都显示日期数字（不再只显示奇数天） */
           for (var dj = 0; dj <= totalDays; dj++) {
             var ddt = addDays(minDate, dj);
-            if ((ddt.getDate() & 1) !== 1) continue;   /* 仅奇数天 */
             var ddx2 = LEFT_PAD + dj * px;
-            var tooNear = Math.abs(ddx2 - todayX) < 20;
+            var tooNear = Math.abs(ddx2 - todayX) < 12;
             for (var mi = 0; !tooNear && mi < monthLabelXs.length; mi++) {
               if (Math.abs(ddx2 - monthLabelXs[mi]) < 10) tooNear = true;
             }
             if (tooNear) continue;
-            if (ddx2 < LEFT_PAD + 6 || ddx2 > worldW - RIGHT_PAD - 4) continue;
+            if (ddx2 < LEFT_PAD + 7 || ddx2 > worldW - RIGHT_PAD - 4) continue;
             S += '<text x="' + ddx2.toFixed(1) + '" y="' + (AXIS_H + 2) + '" text-anchor="middle" font-size="8.5" fill="#9fb0c3">' + ddt.getDate() + '</text>';
           }
         }
@@ -504,31 +521,47 @@
         barRects.push({ x1: x1, y1: barY, x2: x1 + w, y2: barY + hBar });
 
         /* 条内文字：统一「名称(日期)」形态 —— 宽条全名、中条截头保尾（尾部日期不可断） */
+        var placedInBar = false;
         if (w > 160) {
           var t1 = shortCaption(t, w - 14, 11);
           if (t1) {
             S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.8).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="600" fill="' + inText + '">' + esc(t1) + '</text>';
             labelRects.push({ x1: x1 + 3, y1: cy - 9, x2: x1 + w - 3, y2: cy + 6 });
+            placedInBar = true;
           }
         } else if (w > 46) {
           var t2 = shortCaption(t, w - 12, 10);
           if (t2) {
             S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.4).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="600" fill="' + inText + '">' + esc(t2) + '</text>';
             labelRects.push({ x1: x1 + 3, y1: cy - 8, x2: x1 + w - 3, y2: cy + 5 });
+            placedInBar = true;
           }
         } else if (w > 24) {
-          /* 很窄条：只放日期数字 */
-          var dt = rangeCN(t);
-          if (dt && estW(dt, 9) < w - 4) {
-            S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(dt) + '</text>';
+          /* 很窄条：优先放「名称+日期」缩写，放不下再退「纯日期」 */
+          var tn = shortCaption(t, w - 12, 9);
+          if (tn && estW(tn, 9) < w - 4) {
+            S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(tn) + '</text>';
             labelRects.push({ x1: x1 + 2, y1: cy - 8, x2: x1 + w - 2, y2: cy + 5 });
+            placedInBar = true;
+          } else {
+            var dt = rangeCN(t);
+            if (dt && estW(dt, 9) < w - 4) {
+              S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(dt) + '</text>';
+              labelRects.push({ x1: x1 + 2, y1: cy - 8, x2: x1 + w - 2, y2: cy + 5 });
+              placedInBar = true;
+            }
           }
         }
-        /* w<=24 的过窄条：条内不画文字，交第二遍尝试条尾外置小标 */
+        /* w<=24 或条内放不下：条尾外置「名称(日期)」必显标题 */
+        if (!placedInBar) {
+          var capOut = shortCaption(t, 999, 9.5);   /* 无限宽限 → 一定产出（含降级日期） */
+          if (capOut) placeText(x2 + 2, cy, capOut, 9.5, !p ? '#94a3b8' : p[2]);
+        }
       });
 
-      /* ---- 外置文字放置器：右/左/上/下多档试位，撞条或撞字即跳过 ---- */
-      function placeText(x, yBase, txt, fs, col) {
+      /* ---- 外置文字放置器：右/左/上/下多档试位，撞条或撞字即跳过；
+       force=true 时若全档冲突则在首档强制绘制（保证标题必显，高密度时允许轻微压边） ---- */
+      function placeText(x, y, txt, fs, col, force) {
         var wT = estW(txt, fs);
         var tries = [
           { dx: 5, dy: 0, an: 'start' },
@@ -541,7 +574,7 @@
         for (var ti = 0; ti < tries.length; ti++) {
           var tr = tries[ti];
           var bx = (tr.an === 'start') ? (x + tr.dx) : (x + tr.dx - wT);
-          var by0 = yBase + tr.dy;
+          var by0 = y + tr.dy;
           var lx1 = bx, lx2 = bx + wT, ly1 = by0 - 7, ly2 = by0 + 4;
           if (lx1 < LEFT_PAD || lx2 > worldW - RIGHT_PAD) continue;
           var ok = true;
@@ -556,6 +589,16 @@
           if (ok) {
             S += '<text x="' + bx.toFixed(1) + '" y="' + by0.toFixed(1) + '" text-anchor="' + tr.an + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
             labelRects.push({ x1: lx1, y1: ly1, x2: lx2, y2: ly2 });
+            return true;
+          }
+        }
+        /* 全档均撞 → force 时首档强制绘制（跳过碰撞） */
+        if (force) {
+          var fT = tries[0];
+          var fbx = (fT.an === 'start') ? (x + fT.dx) : (x + fT.dx - wT);
+          var fby = y + fT.dy;
+          if (fbx >= LEFT_PAD && fbx + wT <= worldW - RIGHT_PAD) {
+            S += '<text x="' + fbx.toFixed(1) + '" y="' + fby.toFixed(1) + '" text-anchor="' + fT.an + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
             return true;
           }
         }
@@ -579,17 +622,13 @@
           S += '<g class="gv-bar' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' +
             '<path d="M' + x1.toFixed(1) + ',' + (cy - sz).toFixed(1) + ' L' + (x1 + sz).toFixed(1) + ',' + cy.toFixed(1) + ' L' + x1.toFixed(1) + ',' + (cy + sz).toFixed(1) + ' L' + (x1 - sz).toFixed(1) + ',' + cy.toFixed(1) + ' Z" fill="' + dCol + '" stroke="' + (isFlash ? '#f59e0b' : (t.crit ? '#b91c1c' : '#fff')) + '" stroke-width="' + (isFlash ? 2.5 : (t.crit ? 2 : 1)) + '"/></g>';
           barRects.push({ x1: x1 - sz - 2, y1: cy - sz - 2, x2: x1 + sz + 2, y2: cy + sz + 2 });
-          /* 点旁名称标注：名称(日期) 形态，撞条/撞字自动让位 */
-          var cap = shortCaption(t, 175, 10.5);
-          if (cap) placeText(x1, cy, cap, 10.5, !p ? '#8b98a9' : p[2]);
+          /* 点旁名称标注：「名称(日期)」完整形态，撞条/撞字自动让位；过宽则降级截断，仍强制显示 */
+          var capF = captionOf(t);
+          if (estW(capF, 10.5) > 260) capF = shortCaption(t, 240, 10.5);
+          placeText(x1, cy, capF, 10.5, !p ? '#8b98a9' : p[2], true);
           return;
         }
-        /* 过窄条（w<=24，条内实在放不下）→ 条尾外置小标 */
-        var w = Math.max(x2 - x1 + px, 3);
-        if (w <= 24) {
-          var capN = shortCaption(t, 130, 9.5);
-          if (capN) placeText(x2, cy, capN, 9.5, !p ? '#94a3b8' : p[2]);
-        }
+        /* 过窄条（w<=24，已在第一遍放置条尾外置）→ 无需重复 */
       });
       svgEl.innerHTML = S;
 
@@ -685,7 +724,8 @@
     function applyMode() {
       var W = window.innerWidth, H = window.innerHeight;
       var nextMobile = W <= 700;
-      var nextLand = (W > H) && W <= 1024 && H <= 760;
+      autoLand = (W > H) && W <= 1024 && H <= 760;
+      var nextLand = effLand();
       if (nextMobile !== isMobile || nextLand !== isLand) {
         isMobile = nextMobile;
         isLand = nextLand;
@@ -695,6 +735,12 @@
         redraw(centerDate());
         if (isLand) setLabelsCollapsed(true);
       }
+    }
+    /* 受右上角按钮调用的视图切换：'normal'|'land'|'auto' */
+    function setViewMode(mode) {
+      viewOverride = (mode === 'normal' || mode === 'land') ? mode : null;
+      applyMode();
+      redraw(centerDate());
     }
     window.addEventListener('resize', function () {
       applyMode();
@@ -834,7 +880,9 @@
         container.removeChild(styleEl);
       },
       goToday: function () { toolbar.querySelector('[data-act="today"]').click(); },
-      toggleLabels: function () { setLabelsCollapsed(!labelsEl.classList.contains('collapsed')); }
+      toggleLabels: function () { setLabelsCollapsed(!labelsEl.classList.contains('collapsed')); },
+      setViewMode: setViewMode,          /* v5：右上角按钮调用（'normal'/'land'/'auto'） */
+      getViewMode: function () { return viewOverride || (isLand ? 'land' : 'normal'); }
     };
   }
 
