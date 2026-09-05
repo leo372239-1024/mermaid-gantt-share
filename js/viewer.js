@@ -111,13 +111,14 @@
 .gv-close{position:sticky;top:0;float:right;border:none;background:#f3f4f6;width:30px;height:30px;border-radius:50%;
   cursor:pointer;font-size:15px;color:#4b5563}
 .gv-close:hover{background:#e5e7eb}
-/* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转），
-       此处只做布局微调（左列高度收紧），不再旋转 .gv-scroll，避免二次旋转叠加成 180° ---- */
+/* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转）。
+       此处只做布局微调：左列高度收紧；.gv-scroll 保留原生横向滚动（时间轴），但不再拦截触摸事件，
+       与页面共享手势——纵向拖拽自然冒泡到 body 翻页，横向拖拽滚时间轴（浏览器自动分工） ---- */
 .gv-land .gv-toolbar{position:static}
 .gv-land .gv-body{position:relative;overflow:hidden}
 .gv-land .gv-labels{max-height:calc(100vh - 6px)}
 .gv-land .gv-labels.collapsed{width:34px}
-.gv-land .gv-scroll{}
+.gv-land .gv-scroll{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:auto}
 @media (max-width:560px){
   .gv-labels{width:150px}.gv-lhead{font-size:11px;padding:5px 6px}
   .gv-lname{padding:4px 6px;font-size:11px}
@@ -756,24 +757,9 @@
       redraw(centerDate());
     });
 
-    /* ---- 手机横屏旋转后：纵向滑动/滚轮 → 时间滚动 ---- */
-    var lastTouchY = null;
-    scrollEl.addEventListener('touchstart', function (e) {
-      if (isLand && e.touches && e.touches.length === 1) {
-        lastTouchY = e.touches[0].clientY;
-        e.preventDefault();
-      }
-    }, { passive: false });
-    scrollEl.addEventListener('touchmove', function (e) {
-      if (isLand && e.touches && e.touches.length === 1) {
-        if (lastTouchY == null) lastTouchY = e.touches[0].clientY;
-        var dy = e.touches[0].clientY - lastTouchY;
-        lastTouchY = e.touches[0].clientY;
-        scrollEl.scrollLeft -= dy;   /* 旋转后视觉：手指下移=时间向未来（内容跟随） */
-        e.preventDefault();
-      }
-    }, { passive: false });
-    scrollEl.addEventListener('touchend', function () { lastTouchY = null; });
+    /* ---- 滚动交互 ---- */
+    /* 注：横屏（整页旋转）不再拦截触摸——纵向拖拽自然冒泡给 html.page-land body 做整页翻页，
+       横向拖拽由 .gv-scroll 原生 overflow-x:auto 滚时间轴（浏览器自动分工，无需 JS） */
     scrollEl.addEventListener('wheel', function (e) {
       /* 桌面：Ctrl+滚轮 = 缩放时间范围（以视口中心日期为锚点，夹紧数据全跨度） */
       if (e.ctrlKey) {
@@ -787,8 +773,8 @@
         return;
       }
       if (!isLand) return;
-      e.preventDefault();
-      scrollEl.scrollLeft += e.deltaY;   /* 横屏旋转后：滚轮向下=时间向后 */
+      /* 横屏整页旋转：滚轮不再横向转时间，交还页面纵向滚动（整页翻页） */
+      return;
     }, { passive: false });
 
     /* 键盘左右（桌面） */
