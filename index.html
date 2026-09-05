@@ -11,10 +11,16 @@
   *{box-sizing:border-box;margin:0;padding:0}
   html{-webkit-text-size-adjust:100%}
   body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
-  header{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;padding:16px 18px calc(14px + env(safe-area-inset-top))}
+  header{background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;padding:10px 16px calc(12px + env(safe-area-inset-top))}
+  header .hdr-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  header .today{font-size:12.5px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.18);border-radius:999px;padding:4px 12px;white-space:nowrap}
+  header .hdr-btn{appearance:none;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;
+    padding:4px 11px;font-size:12px;cursor:pointer;line-height:1.3;white-space:nowrap}
+  header .hdr-btn:hover{background:rgba(255,255,255,.28)}
+  header .hdr-detail{margin-top:8px}
+  header.collapsed .hdr-detail{display:none}
   header h1{font-size:18px;margin-bottom:3px;letter-spacing:.3px}
   header .sub{font-size:12px;opacity:.94;line-height:1.6}
-  header .today{font-size:12.5px;opacity:.95;margin-top:7px;display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 12px}
   .wrap{max-width:1200px;margin:6px auto 0;padding:0 10px 30px}
   .tip{display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#92400e;margin:12px 0 0;line-height:1.7}
   footer{font-size:11.5px;color:#6b7280;text-align:center;padding:6px 12px 22px;line-height:1.8}
@@ -22,10 +28,16 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>🗓 班级时间线甘特图</h1>
-  <div class="sub">北交大 2026 级软件工程两年制专硕 · 入学到毕业（2026.9 – 2028.7）<br>数据源：本仓库 <code style="color:#fff;background:rgba(255,255,255,.18);padding:0 5px;border-radius:4px">gantt.md</code>（电脑改代码 → 推送 → 页面自动更新）</div>
-  <div class="today" id="todayInfo">加载中…</div>
+<header class="collapsed" id="hdr">
+  <div class="hdr-top">
+    <div class="today" id="todayInfo">加载中…</div>
+    <span style="flex:1"></span>
+    <button class="hdr-btn" id="hdrToggle" title="折叠/展开顶部说明">▾ 展开</button>
+  </div>
+  <div class="hdr-detail">
+    <h1>🗓 班级时间线甘特图</h1>
+    <div class="sub">北交大 2026 级软件工程两年制专硕 · 入学到毕业（2026.9 – 2028.7）<br>数据源：本仓库 <code style="color:#fff;background:rgba(255,255,255,.18);padding:0 5px;border-radius:4px">gantt.md</code>（电脑改代码 → 推送 → 页面自动更新）</div>
+  </div>
 </header>
 
 <div class="wrap">
@@ -37,8 +49,9 @@
 </div>
 
 <footer>
-  工具栏可 <b>切换年/月</b>、<b>📍 回到今天</b>、<b>＋/－ 缩放</b>　·　点任务条或左侧名称 → 查看班务执行详情<br>
-  红色竖线 = 今日，随<b>打开当天</b>自动更新，无需任何人工操作　·　编辑入口：本仓库 <code>editor.html</code>
+  工具栏可 <b>切换年/月</b>、<b>📍 回到今天</b>、<b>＋/－ 缩放</b>　·　<b>点任务条/◆ 节点/左侧名称</b> → 查看事件详情<br>
+  事件按时间自动紧凑排布（互不重叠的任务可同一行）　·　手机横屏自动旋转为纵向时间线<br>
+  红色竖线 = 今日，随<b>打开当天</b>自动更新　·　编辑入口：本仓库 <code>editor.html</code>
 </footer>
 
 <script src="./js/parser.js"></script>
@@ -69,7 +82,20 @@
   const now = new Date();
   const week = ['日','一','二','三','四','五','六'][now.getDay()];
   document.getElementById('todayInfo').textContent =
-    '今天：' + now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日 星期' + week;
+    '📅 今天：' + now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日 星期' + week;
+
+  // 顶部说明栏折叠（默认折叠：仅显示今日日期）
+  const hdr = document.getElementById('hdr');
+  const hdrToggle = document.getElementById('hdrToggle');
+  function setHdrCollapsed(c) {
+    hdr.classList.toggle('collapsed', c);
+    hdrToggle.textContent = c ? '▾ 展开' : '▴ 收起';
+    hdrToggle.title = c ? '展开顶部说明' : '收起顶部说明';
+  }
+  hdrToggle.addEventListener('click', function () {
+    setHdrCollapsed(!hdr.classList.contains('collapsed'));
+  });
+  setHdrCollapsed(true);
 
   // 从 gantt.md 提取 ```mermaid 代码块（取第一块作为甘特数据源）
   const FENCE_RE = /```mermaid\s*\n([\s\S]*?)\n```/g;
