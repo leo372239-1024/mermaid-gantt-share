@@ -111,15 +111,13 @@
 .gv-close{position:sticky;top:0;float:right;border:none;background:#f3f4f6;width:30px;height:30px;border-radius:50%;
   cursor:pointer;font-size:15px;color:#4b5563}
 .gv-close:hover{background:#e5e7eb}
-/* ---- 手机横屏（landscape）：时间图向右旋转 90°，时间纵向流动 ---- */
+/* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转），
+       此处只做布局微调（左列高度收紧），不再旋转 .gv-scroll，避免二次旋转叠加成 180° ---- */
 .gv-land .gv-toolbar{position:static}
 .gv-land .gv-body{position:relative;overflow:hidden}
 .gv-land .gv-labels{max-height:calc(100vh - 6px)}
 .gv-land .gv-labels.collapsed{width:34px}
-.gv-land .gv-scroll{
-  transform:rotate(90deg) translateY(-100%);
-  transform-origin:top left;
-}
+.gv-land .gv-scroll{}
 @media (max-width:560px){
   .gv-labels{width:150px}.gv-lhead{font-size:11px;padding:5px 6px}
   .gv-lname{padding:4px 6px;font-size:11px}
@@ -241,6 +239,9 @@
   function mount(container, ganttCode, eventsData) {
     if (!container) return null;
     eventsData = eventsData || {};
+
+    /* 整页向右旋转 90° 回调（index.html 挂载，applyMode/reportLand 共用同一变量） */
+    var onLand = null;
 
     var model = Parser.parse ? Parser.parse(ganttCode) : null;
     if (!model || !model.range) {
@@ -721,11 +722,19 @@
     });
 
     /* ---- 模式检测与自适应 ---- */
+    /* 整页向右旋转 90° 回调（index.html 挂载）：true=整页旋转；false/null=不旋转 */
+    var lastReported = null;
+    function reportLand() {
+      if (typeof onLand !== 'function') return;
+      var v = effLand();
+      if (v !== lastReported) { lastReported = v; onLand(v); }
+    }
     function applyMode() {
       var W = window.innerWidth, H = window.innerHeight;
       var nextMobile = W <= 700;
       autoLand = (W > H) && W <= 1024 && H <= 760;
       var nextLand = effLand();
+      reportLand();
       if (nextMobile !== isMobile || nextLand !== isLand) {
         isMobile = nextMobile;
         isLand = nextLand;
@@ -882,7 +891,8 @@
       goToday: function () { toolbar.querySelector('[data-act="today"]').click(); },
       toggleLabels: function () { setLabelsCollapsed(!labelsEl.classList.contains('collapsed')); },
       setViewMode: setViewMode,          /* v5：右上角按钮调用（'normal'/'land'/'auto'） */
-      getViewMode: function () { return viewOverride || (isLand ? 'land' : 'normal'); }
+      getViewMode: function () { return viewOverride || (isLand ? 'land' : 'normal'); },
+      onLand: function (fn) { onLand = fn; } /* v6：整页向右旋转 90° 回调（index.html 挂载） */
     };
   }
 

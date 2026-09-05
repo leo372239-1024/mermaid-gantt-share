@@ -25,6 +25,18 @@
   .tip{display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#92400e;margin:12px 0 0;line-height:1.7}
   footer{font-size:11.5px;color:#6b7280;text-align:center;padding:6px 12px 22px;line-height:1.8}
   footer code{background:#eef2f7;padding:1px 5px;border-radius:4px;font-size:11px}
+  /* ---- 整页向右旋转 90°（右上角 ⇄ 按钮 / 手机横屏自动）：header + 甘特图 + footer 全部旋转 ---- */
+  html.page-land, html.page-land body{overflow:hidden}
+  html.page-land body{
+    position:fixed;top:0;left:0;
+    width:100vh;      /* 旋转后视觉高度 = 视口高 */
+    height:100vw;     /* 旋转后视觉宽度 = 视口宽 */
+    transform:rotate(90deg) translateY(-100%);
+    transform-origin:top left;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  html.page-land .wrap{max-width:none;margin:0;padding:0 10px 30px}
 </style>
 </head>
 <body>
@@ -56,7 +68,7 @@
       ① <b>换时间</b>：工具栏 ‹‹上‹年 / ‹‹上‹月 / 下月 › / 下‹年 ››，或 <b>📍 回到今天</b> 一键回到当前日期<br>
       ② <b>缩放</b>：工具栏 ＋放大 / －缩小；桌面也可 <b>Ctrl+滚轮</b>（手机双指捏合缩放）<br>
       ③ <b>看详情</b>：点击 <b>任务条 / ◆ 节点 / 左侧名称</b> 弹出该事件执行说明（班务、负责人、时间地点、步骤提醒）<br>
-      ④ <b>视图</b>：右上角 <b>⇄ 横屏视图</b> 切换 横向时间线 ↔ 向右旋转 90°（手机横着看更清晰）；手机横屏时自动切换<br>
+      ④ <b>视图</b>：右上角 <b>⇄ 横屏视图</b> 切换 常规视图 ↔ 整页向右旋转 90°（整个网页旋转，手机横着看更清晰）；手机横屏时自动切换<br>
       ⑤ <b>定位</b>：点击左侧事件名称 → 自动滚动到该事件日期并高亮闪烁<br>
       红色竖线 = 今日，随<b>打开当天</b>自动更新，无需任何操作
     </div>
@@ -131,6 +143,14 @@
     if (window.GanttViewer && GanttViewer.mount) {
       try {
         gvViewer = GanttViewer.mount(holder, code, window.BJTU_EVENTS || {});
+        if (gvViewer && gvViewer.onLand) {
+          gvViewer.onLand(function (isLandView) { gLandscape = !!isLandView; applyPageLand(); });
+        }
+        // 初始同步一次：mount 后立即以 viewer 当前模式设置整页旋转（手机横屏打开即整页旋转）
+        if (gvViewer && gvViewer.getViewMode) {
+          gLandscape = (gvViewer.getViewMode() === 'land');
+          applyPageLand();
+        }
       } catch (err) {
         holder.innerHTML = '<div style="color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;white-space:pre-wrap">渲染出错：' +
           String(err && err.message ? err.message : err).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</div>';
@@ -144,6 +164,10 @@
   const viewToggle = document.getElementById('viewToggle');
   // 在 boot 内赋值（viewer 挂到作用域外）
   let gvViewer = null;
+  let gLandscape = false;   // 整页是否处于向右旋转 90° 状态（覆盖/自动横屏任一为真）
+  function applyPageLand() {
+    document.documentElement.classList.toggle('page-land', gLandscape);
+  }
   function bindViewToggle() {
     viewToggle.addEventListener('click', function () {
       if (!gvViewer || !gvViewer.setViewMode) {
