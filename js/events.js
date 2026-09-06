@@ -42,6 +42,17 @@
       sampleUrl: "https://raw.githubusercontent.com/leo372239-1024/mermaid-gantt-share/main/samples/b1_20260906_210804.png",
       owners: owners(["王富祥"])
     },
+    b2: {
+      short: "户口迁移证提交",
+      who: "已办理户口迁移的同学",
+      when: "截止时间9月10日前；",
+      where: "",
+      files: "",
+      steps: [],
+      tips: "",
+      sampleUrl: "",
+      owners: owners(["左依晗","张骏齐"])
+    },
     _roles: ROLES
   };
 });
