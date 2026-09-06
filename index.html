@@ -165,7 +165,7 @@
   <div class="admin-card">
     <button class="admin-close" id="adminClose" aria-label="关闭">✕</button>
     <h3>🔒 管理员登录</h3>
-    <p class="admin-sub">输入 GitHub 个人访问令牌（PAT），登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与执行说明，改动将直接写回仓库并对全班生效。<br>令牌仅保存在本机浏览器，不会写入代码或仓库。</p>
+    <p class="admin-sub">输入 GitHub 个人访问令牌（PAT），登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与执行说明；改动先暂存在本地，点工具栏「<strong>💾 保存更改</strong>」后统一写回仓库并对全班生效。<br>令牌仅保存在本机浏览器，不会写入代码或仓库。</p>
     <label>GitHub 令牌（Personal Access Token）
       <input type="password" id="adminToken" placeholder="github_pat_... 或 ghp_..." autocomplete="off">
     </label>
@@ -235,18 +235,31 @@
     return blocks[0];
   }
 
+  // viewer 实例与整页旋转状态（必须在 boot() 之前声明，boot 同步路径会立即赋值）
+  let gvViewer = null;
+  let gLandscape = false;   // 整页是否处于向右旋转 90° 状态（覆盖/自动横屏任一为真）
+
   (async function boot() {
     let code;
-    try {
-      code = await loadGanttCode();
-    } catch (e) {
-      code = SAMPLE_GANTT;
-      document.getElementById('notice').style.display = 'block';
+    let events = window.BJTU_EVENTS || {};
+    // 优先读取本地待提交改动（管理员增删改后、未点「保存更改」前，先用本地数据渲染）
+    let pending = null;
+    try { pending = JSON.parse(localStorage.getItem('gantt_pending') || 'null'); } catch (e) { pending = null; }
+    if (pending && pending.ganttCode) {
+      code = pending.ganttCode;
+      events = pending.events || events;
+    } else {
+      try {
+        code = await loadGanttCode();
+      } catch (e) {
+        code = SAMPLE_GANTT;
+        document.getElementById('notice').style.display = 'block';
+      }
     }
     const holder = document.getElementById('wrap');
     if (window.GanttViewer && GanttViewer.mount) {
       try {
-        gvViewer = GanttViewer.mount(holder, code, window.BJTU_EVENTS || {});
+        gvViewer = GanttViewer.mount(holder, code, events);
         if (gvViewer && gvViewer.onLand) {
           gvViewer.onLand(function (isLandView) { gLandscape = !!isLandView; applyPageLand(); });
         }
@@ -266,9 +279,6 @@
 
   // 右上角：视图切换（常规 ⇄ 向右旋转90° 横屏）—— 绑定在 boot() 内，mount 拿到 viewer 后接线
   const viewToggle = document.getElementById('viewToggle');
-  // 在 boot 内赋值（viewer 挂到作用域外）
-  let gvViewer = null;
-  let gLandscape = false;   // 整页是否处于向右旋转 90° 状态（覆盖/自动横屏任一为真）
   function applyPageLand() {
     document.documentElement.classList.toggle('page-land', gLandscape);
   }

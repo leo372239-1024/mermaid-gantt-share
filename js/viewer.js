@@ -69,7 +69,7 @@
 .gv-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--gv-sub);margin:2px 4px 8px}
 .gv-legend i{display:inline-block;width:20px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .gv-legend i.dia{width:8px;height:8px;transform:rotate(45deg);border-radius:1.5px}
-.gv-legend i.today{width:2px;height:12px;background:#ef4444;margin-right:5px;border-radius:1px}
+.gv-legend i.today{width:2px;height:12px;background:linear-gradient(#FDFC47,#24FE41);margin-right:5px;border-radius:1px}
 .gv-legend .hint{opacity:.75}
 .gv-body{display:flex;align-items:stretch;background:var(--gv-card);border:1px solid var(--gv-line);
   border-radius:14px;overflow:hidden;
@@ -334,7 +334,8 @@
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
-      (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' : '') +
+      (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
+      '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
       '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图" style="margin-left:auto">⛶ 全屏</button>' +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
@@ -370,7 +371,7 @@
     /* ---- 图例 ---- */
     legendEl.innerHTML =
       '<span><i class="today"></i>今日线(随打开自动更新)</span>' +
-      '<span><i style="background:#ef4444;border-radius:2px"></i>近3天开始·未结束(红色高亮)</span>' +
+      '<span><i style="background:linear-gradient(90deg,#FDFC47,#24FE41);border-radius:2px"></i>近3天开始·未结束(高亮)</span>' +
       '<span><i style="background:#cbd5e1"></i>已完成</span>' +
       '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#b45309"></i>不同事件/节点错色区分</span>' +
       '<span><i class="dia" style="background:#7c3aed"></i>里程碑/当日</span>' +
@@ -484,10 +485,15 @@
       function yOfTrack(k) { return AXIS_H + k * rowH; }
 
       var S = '';
-      /* 近期事件高亮渐变（与今日竖线同色 #ef4444 红），用于「开始日在今天±3天内且未结束」的事件/节点 */
-      S += '<defs><linearGradient id="gv-rainbow" x1="0" y1="0" x2="1" y2="0">' +
-        '<stop offset="0" stop-color="#e11d48"/><stop offset=".5" stop-color="#ef4444"/>' +
-        '<stop offset="1" stop-color="#f87171"/></linearGradient></defs>';
+      /* 近期事件高亮渐变 + 今日竖线渐变（黄绿 #FDFC47 → #24FE41），用于「开始日在今天±3天内且未结束」的事件/节点与今日线 */
+      S += '<defs>' +
+        '<linearGradient id="gv-rainbow" x1="0" y1="0" x2="1" y2="0">' +
+        '<stop offset="0" stop-color="#FDFC47"/><stop offset="1" stop-color="#24FE41"/>' +
+        '</linearGradient>' +
+        '<linearGradient id="gv-today" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#FDFC47"/><stop offset="1" stop-color="#24FE41"/>' +
+        '</linearGradient>' +
+        '</defs>';
 
       /* 月份网格 + 轴标签 */
       S += '<g>';
@@ -537,11 +543,11 @@
       }
       S += '</g>';
 
-      /* 今日竖线 */
+      /* 今日竖线（黄绿渐变，纵向） */
       if (hasTodayInRange) {
         var tx = xOf(today);
-        S += '<g><line x1="' + tx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + tx.toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="2.2" opacity=".95"/>' +
-          '<text x="' + (tx + 6).toFixed(1) + '" y="' + (AXIS_H - 7) + '" font-size="10.5" font-weight="700" fill="#ef4444">今日</text></g>';
+        S += '<g><line x1="' + tx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + tx.toFixed(1) + '" y2="' + totalH + '" stroke="url(#gv-today)" stroke-width="2.2" opacity=".95"/>' +
+          '<text x="' + (tx + 6).toFixed(1) + '" y="' + (AXIS_H - 7) + '" font-size="10.5" font-weight="700" fill="#16a34a">今日</text></g>';
       }
 
       /* ================= 绘制事件（两遍：先画条收集占用矩形，再放里程碑与防重叠标注） ================= */
@@ -779,7 +785,7 @@
         ' ~ ' + t.getFullYear() + '年' + (t.getMonth() + 1) + '月';
       legendEl.querySelectorAll('.gv-todaytag').forEach(function (e) { e.remove(); });
       var tt = el('span', 'gv-todaytag');
-      tt.style.cssText = 'color:#ef4444;font-size:11.5px';
+      tt.style.cssText = 'color:#16a34a;font-size:11.5px';
       tt.textContent = '（今日 ' + fmtCN(today) + '）';
       legendEl.appendChild(tt);
     }
@@ -833,6 +839,9 @@
         case 'zoomout': newDays = viewDays * 1.7; target = c; break;
         case 'add':
           openAddForm();
+          return;
+        case 'save':
+          saveAll();
           return;
         case 'fullscreen':
           toggleFullscreen();
@@ -1039,20 +1048,6 @@
         return '<option value="' + esc(sec.name) + '"' + (sec.name === cur ? ' selected' : '') + '>' + esc(sec.name) + '</option>';
       }).join('');
     }
-    /* 写回 gantt.md：读取全文 → 替换 mermaid 块 → PUT（带 sha 防并发覆盖） */
-    function saveGanttBlock(newModel, message) {
-      return Admin.getFile('gantt.md').then(function (f) {
-        var block = Admin.serializeGantt(newModel);
-        var updated = f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + block + '\n```');
-        return Admin.putFile('gantt.md', updated, f.sha, message);
-      });
-    }
-    function saveEventsBlock(newEvents, message) {
-      var content = Admin.serializeEvents(newEvents);
-      return Admin.getFile('js/events.js').then(function (f) {
-        return Admin.putFile('js/events.js', content, f.sha, message);
-      });
-    }
     /* 基于当前 eventsData 构造新对象：changeEvent=null 删除，否则新增/覆盖 */
     function buildEvents(changeId, changeEvent) {
       var out = {};
@@ -1069,6 +1064,71 @@
       if (old) old.remove();
       var d = el('div', 'f-err', '⚠️ ' + esc(msg));
       form.insertBefore(d, form.querySelector('.f-actions'));
+    }
+
+    /* ================= 本地待提交队列（localStorage） =================
+       所有增删改先写到这里（不立即请求 GitHub API），点「保存更改」后统一写回。 */
+    var PENDING_KEY = 'gantt_pending';
+    function loadPending() {
+      try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch (e) { return null; }
+    }
+    function savePending(partial) {
+      var cur = loadPending() || {};
+      if (partial.ganttCode !== undefined) cur.ganttCode = partial.ganttCode;
+      if (partial.events !== undefined) cur.events = partial.events;
+      if (partial.desc !== undefined) cur.desc = partial.desc;
+      try { localStorage.setItem(PENDING_KEY, JSON.stringify(cur)); } catch (e) {}
+    }
+    function clearPending() {
+      try { localStorage.removeItem(PENDING_KEY); } catch (e) {}
+    }
+    function hasPending() {
+      var p = loadPending();
+      return !!(p && (p.ganttCode || p.events));
+    }
+    /* 保存按钮状态：有未提交改动 → 绿色高亮「💾 保存更改」；无 → 灰「✅ 已同步」 */
+    function syncSaveBtn() {
+      var btn = toolbar.querySelector('[data-act="save"]');
+      if (!btn) return;
+      if (hasPending()) {
+        btn.textContent = '💾 保存更改';
+        btn.style.background = '#dcfce7'; btn.style.borderColor = '#86efac'; btn.style.color = '#15803d';
+        btn.disabled = false;
+        btn.title = '将本地所有改动一次性写回 GitHub（全班刷新即见）';
+      } else {
+        btn.textContent = '✅ 已同步';
+        btn.style.background = ''; btn.style.borderColor = ''; btn.style.color = '';
+        btn.disabled = true;
+        btn.title = '当前无未保存的改动';
+      }
+    }
+    /* 统一提交：读 pending → 分别写回 gantt.md / events.js（带 sha 防覆盖）→ 清空并刷新 */
+    function saveAll() {
+      var pending = loadPending();
+      if (!pending || (!pending.ganttCode && !pending.events)) { syncSaveBtn(); return; }
+      var saveBtn = toolbar.querySelector('[data-act="save"]');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
+      var msg = 'sync: ' + (pending.desc || 'batch update');
+      var ops = [];
+      if (pending.ganttCode) {
+        ops.push(Admin.getFile('gantt.md').then(function (f) {
+          var updated = f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + pending.ganttCode + '\n```');
+          return Admin.putFile('gantt.md', updated, f.sha, msg);
+        }));
+      }
+      if (pending.events) {
+        ops.push(Admin.getFile('js/events.js').then(function (f) {
+          return Admin.putFile('js/events.js', Admin.serializeEvents(pending.events), f.sha, msg);
+        }));
+      }
+      Promise.all(ops).then(function () {
+        clearPending();
+        reloadAfterSave();
+      }).catch(function (err) {
+        if (saveBtn) saveBtn.disabled = false;
+        syncSaveBtn();
+        alert('保存失败：' + (err && err.message ? err.message : err));
+      });
     }
 
     /* 渲染编辑/新增表单到抽屉 */
@@ -1123,7 +1183,7 @@
         '    <div class="f-col"><label>负责班委 <span class="f-hint">（逗号分隔人名）</span><input type="text" name="owners" value="' + esc(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }).join('，') : '') + '"></label></div>' +
         '  </div>' +
         '  <div class="f-actions">' +
-        '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">💾 保存</button>' +
+        '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">✓ 暂存更改</button>' +
         '    <button type="button" class="gv-tbtn gv-crudcancel">取消</button>' +
         '  </div>' +
         '</form>';
@@ -1194,7 +1254,7 @@
           files: String(fd.get('files') || '').trim(),
           steps: String(fd.get('steps') || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
           tips: String(fd.get('tips') || '').trim(),
-          owners: String(fd.get('owners') || '').split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (n) { return { name: n }; })
+          owners: String(fd.get('owners') || '').split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (n) { return { name: n, role: (eventsData._roles && eventsData._roles[n]) || '' }; })
         };
       }
 
@@ -1203,16 +1263,13 @@
       else if (!isNew && ev) { needEvents = true; newEvents = buildEvents(task.id, null); }
 
       var msg = (isNew ? 'add' : 'update') + ': ' + id + ' ' + name;
-      var saveBtn = form.querySelector('#gv-crudsave');
-      saveBtn.disabled = true; saveBtn.textContent = '保存中…';
-
-      var ops = [saveGanttBlock(newModel, msg)];
-      if (needEvents) ops.push(saveEventsBlock(newEvents, msg));
-      Promise.all(ops).then(function () { reloadAfterSave(); })
-        .catch(function (err) {
-          saveBtn.disabled = false; saveBtn.textContent = '💾 保存';
-          showFormErr(form, String(err && err.message ? err.message : err));
-        });
+      /* 本地暂存改动（不立即请求 GitHub API），点工具栏「保存更改」后统一写回 */
+      savePending({
+        ganttCode: Admin.serializeGantt(newModel),
+        events: needEvents ? newEvents : undefined,
+        desc: msg
+      });
+      reloadAfterSave();
     }
 
     function confirmDelete(task) {
@@ -1222,7 +1279,7 @@
         '<div class="gv-dhead">🗑 删除确认</div>' +
         '<div class="gv-confirm">确定删除 <b>「' + esc(task.name) + '」</b> 吗？<br>' +
         (ev ? '该条目含执行说明，将<b>同时删除其执行说明</b>。' : '') +
-        '此操作会通过 GitHub API 直接写回仓库并<b>立即对全班生效</b>，难以撤销。</div>' +
+        '删除会先暂存在本地，点工具栏「保存更改」后统一写回并对全班生效。</div>' +
         '<div class="f-actions"><button class="gv-tbtn gv-delconfirm" style="background:#dc2626;color:#fff;border-color:#dc2626">确认删除</button><button class="gv-tbtn gv-crudcancel">取消</button></div>';
       drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
       drawer.querySelector('.gv-crudcancel').addEventListener('click', closeDetail);
@@ -1237,20 +1294,20 @@
         })
       };
       var msg = 'delete: ' + task.id + ' ' + task.name;
-      drawer.innerHTML = '<div class="grab"></div><div class="gv-dhead">删除中…</div><div class="f-hint" style="margin-top:10px">正在通过 GitHub API 写回仓库，请稍候。</div>';
-      var ops = [saveGanttBlock(newModel, msg)];
-      if (ev) ops.push(saveEventsBlock(buildEvents(task.id, null), msg));
-      Promise.all(ops).then(function () { reloadAfterSave(); })
-        .catch(function (err) {
-          drawer.innerHTML = '<div class="grab"></div><button class="gv-close">✕</button><div class="gv-dhead">删除失败</div><div class="f-err">' + esc(String(err && err.message ? err.message : err)) + '</div>';
-          drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
-        });
+      /* 本地暂存删除（不立即请求 GitHub API），点工具栏「保存更改」后统一写回 */
+      savePending({
+        ganttCode: Admin.serializeGantt(newModel),
+        events: ev ? buildEvents(task.id, null) : undefined,
+        desc: msg
+      });
+      reloadAfterSave();
     }
 
     /* 首次定位：今日（今日超出图范围则定位到数据末端） */
     root.classList.toggle('gv-land', isLand);
     var bootCenter = hasTodayInRange ? new Date(today) : (today > maxDate ? new Date(maxDate) : new Date(minDate));
     redraw(bootCenter);
+    syncSaveBtn();
 
     return {
       destroy: function () {
