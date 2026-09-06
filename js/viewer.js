@@ -109,13 +109,14 @@
 .gv-hit{cursor:pointer}
 .gv-flash{animation:gvFlash 1.2s ease-in-out 2}
 @keyframes gvFlash{0%,100%{opacity:1}50%{opacity:.3}}
-/* 详情抽屉 */
+/* 详情中心弹窗（fixed 相对视口；全屏时 .gv-root:fullscreen 成为 containing block，仍居中显示） */
 .gv-mask{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:60;opacity:0;transition:opacity .18s;pointer-events:none;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
 .gv-mask.on{opacity:1;pointer-events:auto}
-.gv-drawer{position:fixed;left:0;right:0;bottom:0;max-height:84vh;overflow-y:auto;background:#fff;z-index:61;
-  border-radius:18px 18px 0 0;padding:14px 20px calc(18px + env(safe-area-inset-bottom));
-  transform:translateY(102%);transition:transform .22s cubic-bezier(.2,.8,.25,1);box-shadow:0 -16px 48px -12px rgba(15,23,42,.25)}
-.gv-drawer.on{transform:translateY(0)}
+.gv-drawer{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
+  width:min(640px,calc(100vw - 32px));max-height:86vh;overflow-y:auto;background:#fff;z-index:61;
+  border-radius:18px;padding:16px 20px 20px;opacity:0;
+  transition:opacity .22s,transform .22s cubic-bezier(.2,.8,.25,1);box-shadow:0 24px 64px -16px rgba(15,23,42,.35)}
+.gv-drawer.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
 .gv-drawer .grab{width:44px;height:4px;border-radius:2px;background:#e2e8f0;margin:0 auto 12px}
 .gv-dhead{font-size:18px;font-weight:700;color:#0f172a;margin:2px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.3}
 .gv-dsub{font-size:12px;color:var(--gv-sub);margin-bottom:12px;line-height:1.8}
@@ -620,14 +621,14 @@
         if (w > 160) {
           var t1 = shortCaption(t, w - 14, 11);
           if (t1) {
-            S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.8).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="600" fill="' + inText + '">' + esc(t1) + '</text>';
+            S += '<text class="gv-hit" data-id="' + id + '" x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.8).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="600" fill="' + inText + '">' + esc(t1) + '</text>';
             labelRects.push({ x1: x1 + 3, y1: cy - 9, x2: x1 + w - 3, y2: cy + 6 });
             placedInBar = true;
           }
         } else if (w > 46) {
           var t2 = shortCaption(t, w - 12, 10);
           if (t2) {
-            S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.4).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="600" fill="' + inText + '">' + esc(t2) + '</text>';
+            S += '<text class="gv-hit" data-id="' + id + '" x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.4).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="600" fill="' + inText + '">' + esc(t2) + '</text>';
             labelRects.push({ x1: x1 + 3, y1: cy - 8, x2: x1 + w - 3, y2: cy + 5 });
             placedInBar = true;
           }
@@ -635,13 +636,13 @@
           /* 很窄条：优先放「名称+日期」缩写，放不下再退「纯日期」 */
           var tn = shortCaption(t, w - 12, 9);
           if (tn && estW(tn, 9) < w - 4) {
-            S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(tn) + '</text>';
+            S += '<text class="gv-hit" data-id="' + id + '" x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(tn) + '</text>';
             labelRects.push({ x1: x1 + 2, y1: cy - 8, x2: x1 + w - 2, y2: cy + 5 });
             placedInBar = true;
           } else {
             var dt = rangeCN(t);
             if (dt && estW(dt, 9) < w - 4) {
-              S += '<text x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(dt) + '</text>';
+              S += '<text class="gv-hit" data-id="' + id + '" x="' + (x1 + w / 2).toFixed(1) + '" y="' + (cy + 3.2).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + inText + '">' + esc(dt) + '</text>';
               labelRects.push({ x1: x1 + 2, y1: cy - 8, x2: x1 + w - 2, y2: cy + 5 });
               placedInBar = true;
             }
@@ -980,8 +981,9 @@
       if (!mask) {
         mask = el('div', 'gv-mask');
         drawer = el('div', 'gv-drawer');
-        document.body.appendChild(mask);
-        document.body.appendChild(drawer);
+        /* 挂到 .gv-root 内：全屏（.gv-root:fullscreen）时弹窗仍在全屏层内可见 */
+        root.appendChild(mask);
+        root.appendChild(drawer);
         mask.addEventListener('click', closeDetail);
       }
       var st = statusOf(task, today);
@@ -1119,23 +1121,41 @@
         btn.title = '当前无未保存的改动';
       }
     }
-    /* 统一提交：读 pending → 分别写回 gantt.md / events.js（带 sha 防覆盖）→ 清空并刷新 */
+    /* 统一提交：读 pending → 分别写回 gantt.md / events.js（带 sha 防覆盖，sha 冲突自动重试）→ 清空并刷新 */
     function saveAll() {
       var pending = loadPending();
       if (!pending || (!pending.ganttCode && !pending.events)) { syncSaveBtn(); return; }
       var saveBtn = toolbar.querySelector('[data-act="save"]');
       if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
       var msg = 'sync: ' + (pending.desc || 'batch update');
+
+      /* 带重试的写回：GitHub API 缓存/并发可能返回过期 sha → 409 冲突时重新 getFile 拿最新 sha 再写（最多 3 次） */
+      function writeFile(path, buildContent) {
+        var attempt = function (retries) {
+          return Admin.getFile(path).then(function (f) {
+            return Admin.putFile(path, buildContent(f), f.sha, msg);
+          }).catch(function (err) {
+            var m = String(err && err.message ? err.message : '');
+            if (/is at|expected|does not match/i.test(m) && retries > 0) {
+              return new Promise(function (resolve) { setTimeout(resolve, 500); }).then(function () {
+                return attempt(retries - 1);
+              });
+            }
+            throw err;
+          });
+        };
+        return attempt(3);
+      }
+
       var ops = [];
       if (pending.ganttCode) {
-        ops.push(Admin.getFile('gantt.md').then(function (f) {
-          var updated = f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + pending.ganttCode + '\n```');
-          return Admin.putFile('gantt.md', updated, f.sha, msg);
+        ops.push(writeFile('gantt.md', function (f) {
+          return f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + pending.ganttCode + '\n```');
         }));
       }
       if (pending.events) {
-        ops.push(Admin.getFile('js/events.js').then(function (f) {
-          return Admin.putFile('js/events.js', Admin.serializeEvents(pending.events), f.sha, msg);
+        ops.push(writeFile('js/events.js', function () {
+          return Admin.serializeEvents(pending.events);
         }));
       }
       Promise.all(ops).then(function () {

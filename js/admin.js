@@ -172,9 +172,9 @@
     return h;
   }
 
-  /* 读文件：返回 { content: 解码后的文本, sha } */
+  /* 读文件：返回 { content: 解码后的文本, sha }（加时间戳 cache-busting，绕过 GitHub CDN 缓存避免拿到过期 sha） */
   function getFile(path) {
-    return fetch(API_BASE + path + '?ref=' + REPO.branch, { headers: authHeaders(), cache: 'no-store' })
+    return fetch(API_BASE + path + '?ref=' + REPO.branch + '&_=' + Date.now(), { headers: authHeaders(), cache: 'no-store' })
       .then(function (res) {
         if (!res.ok) return res.json().then(function (j) { throw new Error('读取 ' + path + ' 失败：' + (j.message || res.status)); });
         return res.json();
