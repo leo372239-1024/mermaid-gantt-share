@@ -165,6 +165,20 @@
 .gv-form .f-err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:9px;padding:9px 12px;font-size:12.5px;line-height:1.6;white-space:pre-wrap}
 .gv-confirm{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:12px;padding:14px 16px;font-size:13px;line-height:1.7;margin-top:10px}
 .gv-confirm b{color:#7c2d12}
+/* v17：提交材料参考示例（图片） */
+.gv-sample{margin-top:4px}
+.gv-sample .gv-sample-thumb{display:block;max-width:280px;max-height:200px;border-radius:12px;border:1px solid #e2e8f0;margin:6px 0 4px;cursor:zoom-in;box-shadow:0 4px 12px -6px rgba(15,23,42,.18)}
+.gv-sample a{font-size:12.5px;font-weight:600;color:#4f46e5;text-decoration:none}
+.gv-sample a:hover{text-decoration:underline}
+/* 图片灯箱：与弹窗同级全屏遮罩预览大图 */
+.gv-lightbox{position:fixed;inset:0;background:rgba(15,23,42,.78);z-index:10001;display:flex;align-items:center;justify-content:center;cursor:zoom-out;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.gv-lightbox img{max-width:92vw;max-height:88vh;border-radius:10px;box-shadow:0 24px 80px -12px rgba(0,0,0,.6)}
+.gv-form .f-sample{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.gv-form .f-sample img{max-width:160px;max-height:120px;border-radius:10px;border:1px solid #e2e8f0;margin:4px 0}
+.gv-form .f-sample .f-sample-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.gv-form .f-sample input[type=file]{font-size:12px;width:100%;max-width:220px}
+.gv-form .f-sample .f-sample-rm{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
+.coming{opacity:.6;font-style:italic}
 /* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转）。
        此处只做布局微调：左列高度收紧；.gv-scroll 保留原生横向滚动（时间轴），但不再拦截触摸事件，
        与页面共享手势——纵向拖拽自然冒泡到 body 翻页，横向拖拽滚时间轴（浏览器自动分工） ---- */
@@ -1024,6 +1038,15 @@
         }).join('')
         : '/');
       body += row('是否已完成', task.done ? '已完成' : '未完成');
+      /* v17：提交材料参考示例（图片）——所有人可见、可点击查看大图、可下载 */
+      if (ev && ev.sampleUrl) {
+        body += '<div class="gv-drow"><span class="k">提交材料参考示例</span><span class="v gv-sample">' +
+          '<img class="gv-sample-thumb" src="' + esc(ev.sampleUrl) + '" alt="材料示例图" loading="lazy">' +
+          '<br><a href="' + esc(ev.sampleUrl) + '" target="_blank" rel="noopener" download>查看大图 / 下载图片</a>' +
+          '</span></div>';
+      } else {
+        body += row('提交材料参考示例', '/');
+      }
 
       drawer.innerHTML =
         '<div class="grab"></div><button class="gv-close" aria-label="关闭">✕</button>' +
@@ -1036,6 +1059,19 @@
             '</div>'
           : '');
       drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
+      /* v17：示例图片点击 → 全屏灯箱查看大图 */
+      var thumb = drawer.querySelector('.gv-sample-thumb');
+      if (thumb) {
+        thumb.addEventListener('click', function () {
+          var lb = document.createElement('div');
+          lb.className = 'gv-lightbox';
+          var img = document.createElement('img');
+          img.src = thumb.src; img.alt = '示例大图';
+          lb.appendChild(img);
+          lb.addEventListener('click', function () { lb.remove(); });
+          (root || document.body).appendChild(lb);
+        });
+      }
       if (isAdmin) {
         drawer.querySelector('.gv-editbtn').addEventListener('click', function () { openEditForm(task); });
         drawer.querySelector('.gv-delbtn').addEventListener('click', function () { confirmDelete(task); });
@@ -1096,6 +1132,8 @@
       if (partial.ganttCode !== undefined) cur.ganttCode = partial.ganttCode;
       if (partial.events !== undefined) cur.events = partial.events;
       if (partial.desc !== undefined) cur.desc = partial.desc;
+      /* v17：待上传示例图队列（dataUrl 仅在内存/本轮 pending；上传成功后的事件写回用 raw 直链） */
+      if (partial.sampleUploads !== undefined) cur.sampleUploads = partial.sampleUploads || [];
       try { localStorage.setItem(PENDING_KEY, JSON.stringify(cur)); } catch (e) {}
     }
     function clearPending() {
@@ -1121,13 +1159,31 @@
         btn.title = '当前无未保存的改动';
       }
     }
-    /* 统一提交：读 pending → 分别写回 gantt.md / events.js（带 sha 防覆盖，sha 冲突自动重试）→ 清空并刷新 */
-    function saveAll() {
+    /* 统一提交：读 pending → 先上传新示例图片（若 pending.sampleUploads）→
+       再写回 gantt.md / events.js（带 sha 防覆盖，冲突自动重试）→ 清空并刷新。
+       opts.silent=true 供每 3 分钟自动同步调用（失败不弹窗，只写状态条）。返回 Promise。 */
+    function saveAll(opts) {
+      opts = opts || {};
       var pending = loadPending();
-      if (!pending || (!pending.ganttCode && !pending.events)) { syncSaveBtn(); return; }
+      if (!pending || (!pending.ganttCode && !pending.events && !(pending.sampleUploads && pending.sampleUploads.length))) {
+        syncSaveBtn(); return Promise.resolve();
+      }
       var saveBtn = toolbar.querySelector('[data-act="save"]');
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
+      if (saveBtn) { saveBtn.disabled = true; if (!opts.silent) saveBtn.textContent = '保存中…'; }
       var msg = 'sync: ' + (pending.desc || 'batch update');
+
+      /* 先把改动的示例图片上传到仓库，拿到 raw 直链写信回 events（每张仅传一次） */
+      function uploadSamples() {
+        var ups = (pending.sampleUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
+        if (!ups.length) return Promise.resolve(null);
+        return Promise.all(ups.map(function (u) {
+          return Admin.putImage(u.id, u.dataUrl, msg).then(function (url) {
+            return { id: u.id, url: url };
+          });
+        })).then(function (results) {
+          return results.reduce(function (acc, r) { acc[r.id] = r.url; return acc; }, {});
+        });
+      }
 
       /* 带重试的写回：GitHub API 缓存/并发可能返回过期 sha → 409 冲突时重新 getFile 拿最新 sha 再写（最多 3 次） */
       function writeFile(path, buildContent) {
@@ -1147,24 +1203,36 @@
         return attempt(3);
       }
 
-      var ops = [];
-      if (pending.ganttCode) {
-        ops.push(writeFile('gantt.md', function (f) {
-          return f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + pending.ganttCode + '\n```');
-        }));
-      }
-      if (pending.events) {
-        ops.push(writeFile('js/events.js', function () {
-          return Admin.serializeEvents(pending.events);
-        }));
-      }
-      Promise.all(ops).then(function () {
+      return uploadSamples().then(function (urlMap) {
+        var ops = [];
+        var effEvents = pending.events;
+        if (urlMap && effEvents) {
+          /* 图片直链合并进 events：sampleUrl 已是新直链则不动（保留本地 dataUrl 只在内存态，序列化取 url） */
+          effEvents = JSON.parse(JSON.stringify(effEvents));
+          Object.keys(urlMap).forEach(function (id) {
+            if (effEvents[id]) effEvents[id].sampleUrl = urlMap[id];
+          });
+        }
+        if (pending.ganttCode) {
+          ops.push(writeFile('gantt.md', function (f) {
+            return f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + pending.ganttCode + '\n```');
+          }));
+        }
+        if (effEvents) {
+          ops.push(writeFile('js/events.js', function () {
+            return Admin.serializeEvents(effEvents);
+          }));
+        }
+        return Promise.all(ops);
+      }).then(function () {
         clearPending();
-        reloadAfterSave();
+        syncSaveBtn();
+        if (!opts.silent) reloadAfterSave();
       }).catch(function (err) {
         if (saveBtn) saveBtn.disabled = false;
         syncSaveBtn();
-        alert('保存失败：' + (err && err.message ? err.message : err));
+        if (!opts.silent) alert('保存失败：' + (err && err.message ? err.message : err));
+        else console.warn('[gantt] 自动同步失败：', err && err.message ? err.message : err);
       });
     }
 
@@ -1224,6 +1292,11 @@
         '    <div class="f-col"><label>相关同学执行步骤 <span class="f-hint">（每行一步）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea></label></div>' +
         '    <div class="f-col"><label>备注<input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '"></label></div>' +
         '    <div class="f-col"><label>责任的班委 <span class="f-hint">（多选）</span><div class="f-owners">' + ownerBoxes(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }) : []) + '</div></label></div>' +
+        '    <div class="f-col"><label>提交材料参考示例 <span class="f-hint">（可选，上传一张图片，全班可见可下载）</span>' +
+        '      <div class="f-sample"><img id="gv-sample-preview" src="' + (ev && ev.sampleUrl ? esc(ev.sampleUrl) : '') + '" style="display:' + (ev && ev.sampleUrl ? 'block' : 'none') + '" alt="预览">' +
+        '      <div class="f-sample-actions"><input type="file" name="sampleFile" accept="image/png,image/jpeg,image/gif,image/webp">' +
+        (ev && ev.sampleUrl ? '<button type="button" class="f-sample-rm" id="gv-sample-rm">移除示例图</button>' : '') +
+        '      </div></div></label></div>' +
         '  </div>' +
         '  <div class="f-actions">' +
         '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">✓ 暂存更改</button>' +
@@ -1242,6 +1315,42 @@
       function syncEv() { evFields.style.display = isEventCb.checked ? 'block' : 'none'; }
       isEventCb.addEventListener('change', syncEv);
       syncEv();
+
+      /* v17：示例图上传预览 + 移除（图片仅暂存本地 pending，随「保存更改」统一上传） */
+      var sampleFile = drawer.querySelector('[name=sampleFile]');
+      var samplePrev = drawer.querySelector('#gv-sample-preview');
+      var sampleRm = drawer.querySelector('#gv-sample-rm');
+      window.__sampleDataUrl = (ev && ev.sampleUrl) ? ev.sampleUrl : null;   /* 挂全局供 handleSubmit 读取（表单字段不落盘） */
+      if (sampleFile) {
+        sampleFile.addEventListener('change', function () {
+          var f = sampleFile.files && sampleFile.files[0];
+          if (!f) return;
+          if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { showFormErr(form, '仅支持 png/jpeg/gif/webp 图片'); sampleFile.value = ''; return; }
+          var rd = new FileReader();
+          rd.onload = function () {
+            window.__sampleDataUrl = rd.result;
+            samplePrev.src = rd.result; samplePrev.style.display = 'block';
+            if (!sampleRm) {
+              sampleRm = document.createElement('button');
+              sampleRm.type = 'button'; sampleRm.className = 'f-sample-rm'; sampleRm.textContent = '移除示例图';
+              sampleFile.parentNode.appendChild(sampleRm);
+              sampleRm.addEventListener('click', function () {
+                window.__sampleDataUrl = null; sampleFile.value = '';
+                samplePrev.style.display = 'none';
+                sampleRm.remove();
+              });
+            }
+          };
+          rd.readAsDataURL(f);
+        });
+      }
+      if (sampleRm) {
+        sampleRm.addEventListener('click', function () {
+          window.__sampleDataUrl = null; sampleFile.value = '';
+          samplePrev.style.display = 'none';
+          sampleRm.remove();
+        });
+      }
 
       mask.classList.add('on');
       drawer.classList.add('on');
@@ -1297,8 +1406,10 @@
           files: String(fd.get('files') || '').trim(),
           steps: String(fd.get('steps') || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
           tips: String(fd.get('tips') || '').trim(),
+          sampleUrl: window.__sampleDataUrl || (ev ? (ev.sampleUrl || '') : ''),
           owners: fd.getAll('owner').map(function (n) { return { name: n, role: (eventsData._roles && eventsData._roles[n]) || '' }; })
         };
+        window.__sampleDataUrl = null;
       }
 
       var needEvents = false, newEvents = null;
@@ -1306,12 +1417,21 @@
       else if (!isNew && ev) { needEvents = true; newEvents = buildEvents(task.id, null); }
 
       var msg = (isNew ? 'add' : 'update') + ': ' + id + ' ' + name;
-      /* 本地暂存改动（不立即请求 GitHub API），点工具栏「保存更改」后统一写回 */
-      savePending({
+      /* v17：若用户本次选了新图片（本地 dataUrl）→ 记录到待上传队列（上传成功后写回 events 时替换为 raw 直链） */
+      var pendingPartial = {
         ganttCode: Admin.serializeGantt(newModel),
         events: needEvents ? newEvents : undefined,
         desc: msg
-      });
+      };
+      var sampleUrlVal = newEvent ? newEvent.sampleUrl : null;
+      if (sampleUrlVal && /^data:image\//.test(sampleUrlVal)) {
+        var ups = (loadPending() || {}).sampleUploads || [];
+        ups = ups.filter(function (u) { return u.id !== id; });
+        ups.push({ id: id, dataUrl: sampleUrlVal });
+        pendingPartial.sampleUploads = ups;
+      }
+      /* 本地暂存改动（不立即请求 GitHub API），点工具栏「保存更改」/每 3 分钟自动同步时统一写回 */
+      savePending(pendingPartial);
       reloadAfterSave();
     }
 
@@ -1352,8 +1472,25 @@
     redraw(bootCenter);
     syncSaveBtn();
 
+    /* v17：每 3 分钟自动同步——管理员登录态且本地有未提交改动时，静默写回 GitHub（成功不清空页面，免打扰） */
+    var AUTO_SYNC_MS = 3 * 60 * 1000;
+    var autoSyncTimer = null;
+    function autoSyncTick() {
+      var adminNow = (G.GanttAdmin && G.GanttAdmin.isLoggedIn) ? G.GanttAdmin.isLoggedIn() : false;
+      if (adminNow && hasPending()) {
+        saveAll({ silent: true });
+      }
+    }
+    autoSyncTimer = setInterval(autoSyncTick, AUTO_SYNC_MS);
+    /* 页面不可见时暂停，避免后台标签页白白调用 GitHub API；回到可见再补一次 */
+    function onVis() { if (!document.hidden) autoSyncTick(); }
+    G.document && G.document.addEventListener && G.document.addEventListener('visibilitychange', onVis);
+
+    mount._stopAutoSync = function () { if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; } };
+
     return {
       destroy: function () {
+        if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
         if (mask) { mask.remove(); drawer.remove(); }
         container.removeChild(root);
         container.removeChild(styleEl);

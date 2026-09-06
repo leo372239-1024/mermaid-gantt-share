@@ -119,6 +119,7 @@
       out.push('      files: ' + jsStr(e.files) + ',');
       out.push('      steps: ' + jsArr(e.steps) + ',');
       out.push('      tips: ' + jsStr(e.tips) + ',');
+      out.push('      sampleUrl: ' + jsStr(e.sampleUrl) + ',');
       out.push('      owners: ' + ownersCall(e.owners));
       out.push('    },');   /* 每个条目后必带逗号（_roles 恒在末尾） */
     });
@@ -202,6 +203,31 @@
     });
   }
 
+  /* 图片上传到仓库 samples/ 并返回 raw 直链（供事件「提交材料参考示例」使用）。
+     文件名规则：{id}_{yyyyMMdd_HHmmss}{ext}，天然幂等且避免与他人并发重名。 */
+  function putImage(id, dataUrl, message) {
+    var m = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/.exec(String(dataUrl || ''));
+    if (!m) return Promise.reject(new Error('图片格式不支持，仅支持 png/jpeg/gif/webp'));
+    var ext = m[1] === 'image/jpeg' ? '.jpg' : m[1].replace('image/', '.');
+    var now = new Date();
+    function p2(n) { return n < 10 ? '0' + n : '' + n; }
+    var p = 'samples/' + String(id).replace(/[^A-Za-z0-9_-]/g, '') + '_' +
+      now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + '_' +
+      p2(now.getHours()) + p2(now.getMinutes()) + p2(now.getSeconds()) + ext;
+    return fetch(API_BASE + p, {
+      method: 'PUT',
+      headers: Object.assign(authHeaders(), { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        message: message || ('sample: ' + p),
+        content: m[2],                                 /* base64 原样写入（UTF-8 转码会破坏二进制） */
+        branch: REPO.branch
+      })
+    }).then(function (res) {
+      if (!res.ok) return res.json().then(function (j) { throw new Error('上传图片失败：' + (j.message || res.status)); });
+      return 'https://raw.githubusercontent.com/' + REPO.owner + '/' + REPO.repo + '/' + REPO.branch + '/' + p;
+    });
+  }
+
   /* 验证令牌是否有效（读一个已知文件，contents:read 即可） */
   function validateToken(token) {
     var h = { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + token };
@@ -227,6 +253,7 @@
     isLoggedIn: isLoggedIn,
     validateToken: validateToken,
     getFile: getFile,
-    putFile: putFile
+    putFile: putFile,
+    putImage: putImage
   };
 });

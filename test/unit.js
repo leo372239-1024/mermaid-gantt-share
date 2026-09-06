@@ -119,6 +119,8 @@ let evDiff = 0;
 if (JSON.stringify(k1) !== JSON.stringify(k2)) evDiff++;
 k1.forEach(id => {
   ['short', 'who', 'when', 'where', 'files', 'tips'].forEach(f => { if (Events[id][f] !== Events2[id][f]) evDiff++; });
+  /* v17：sampleUrl 保持往返一致（默认 '' 也要一致） */
+  if ((Events[id].sampleUrl || '') !== (Events2[id].sampleUrl || '')) evDiff++;
   if (JSON.stringify(Events[id].steps) !== JSON.stringify(Events2[id].steps)) evDiff++;
   if (Events[id].owners.map(o => o.name).join(',') !== Events2[id].owners.map(o => o.name).join(',')) evDiff++;
 });
