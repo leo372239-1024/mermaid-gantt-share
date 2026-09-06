@@ -16,6 +16,7 @@ gantt
     dateFormat YYYY-MM-DD
     axisFormat %Y-%m
     section 入学前准备
+    收体检表 :b1, 2026-09-05, 2026-09-07
     section 报到与注册
     section 开学季事务(班级通知)
     section 第一学期(2026秋)
