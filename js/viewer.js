@@ -56,6 +56,13 @@
   font-weight:600;box-shadow:0 4px 14px -4px rgba(79,70,229,.45)}
 .gv-tbtn.primary:hover{transform:translateY(-1px);background:linear-gradient(135deg,#4338ca,#4f46e5);
   border-color:transparent;color:#fff;box-shadow:0 8px 22px -6px rgba(79,70,229,.5)}
+.gv-tbtn.gv-fsbtn{color:#475569;border-color:#e2e8f0}
+.gv-tbtn.gv-fsbtn:hover{color:#3730a3}
+/* 浏览器内全屏：原生 Fullscreen API 生效态（桌面/Android/iPad） */
+.gv-root:fullscreen{background:#fafafa;overflow:auto;padding:14px 16px;width:100%;height:100%}
+.gv-root:-webkit-full-screen{background:#fafafa;overflow:auto;padding:14px 16px;width:100%;height:100%}
+/* CSS 模拟全屏（iPhone 等不支持 Element.requestFullscreen 的环境兜底） */
+.gv-root.faux-full{position:fixed;inset:0;z-index:999;background:#fafafa;overflow:auto;padding:14px 16px}
 .gv-range{font-size:12px;color:var(--gv-sub);background:#f8fafc;border:1px solid #eef1f6;border-radius:8px;
   padding:5px 11px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .gv-range b{color:var(--gv-blue-700);font-weight:600}
@@ -327,6 +334,7 @@
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点/班务" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' : '') +
+      '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图" style="margin-left:auto">⛶ 全屏</button>' +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
       '<div class="gv-body" id="gv-body">' +
@@ -774,6 +782,43 @@
       legendEl.appendChild(tt);
     }
 
+    /* ---- 全屏显示 ---- */
+    var fsBtn = root.querySelector('[data-act="fullscreen"]');
+    function syncFsIcon() {
+      var on = !!(document.fullscreenElement || document.webkitFullscreenElement) || root.classList.contains('faux-full');
+      if (fsBtn) fsBtn.innerHTML = on ? '⛶ 退出全屏' : '⛶ 全屏';
+    }
+    function enterFaux() {
+      root.classList.add('faux-full');
+      document.body.style.overflow = 'hidden';
+      syncFsIcon();
+    }
+    function exitFaux() {
+      root.classList.remove('faux-full');
+      document.body.style.overflow = '';
+      syncFsIcon();
+    }
+    function toggleFullscreen() {
+      if (root.classList.contains('faux-full')) { exitFaux(); return; }
+      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (fsEl) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        return;
+      }
+      var fs = root.requestFullscreen || root.webkitRequestFullscreen;
+      if (fs) {
+        try {
+          var p = fs.call(root);
+          if (p && p.catch) p.catch(function () { enterFaux(); });
+        } catch (e) { enterFaux(); }
+      } else {
+        enterFaux();
+      }
+    }
+    document.addEventListener('fullscreenchange', syncFsIcon);
+    document.addEventListener('webkitfullscreenchange', syncFsIcon);
+
     /* ---- 工具条 ---- */
     toolbar.addEventListener('click', function (ev) {
       var b = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
@@ -786,6 +831,9 @@
         case 'zoomout': newDays = viewDays * 1.7; target = c; break;
         case 'add':
           openAddForm();
+          return;
+        case 'fullscreen':
+          toggleFullscreen();
           return;
         case 'today':
           target = hasTodayInRange ? new Date(today) : (today > maxDate ? new Date(maxDate) : new Date(minDate));
