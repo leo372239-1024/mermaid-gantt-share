@@ -191,6 +191,9 @@
 .gv-form .f-att-row .rm{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:7px;
   padding:3px 9px;font-size:11.5px;cursor:pointer}
 .gv-form .f-stepimg img{max-width:160px;max-height:120px;border-radius:10px;border:1px solid #e2e8f0;margin:4px 0}
+/* v20：备注配图（详情 + 表单） */
+.gv-tipsimg{display:block;max-width:280px;max-height:200px;border-radius:12px;border:1px solid #e2e8f0;margin:8px 0 2px;cursor:zoom-in;box-shadow:0 4px 12px -6px rgba(15,23,42,.18)}
+.gv-form .f-tipsimg img{max-width:160px;max-height:120px;border-radius:10px;border:1px solid #e2e8f0;margin:4px 0}
 .coming{opacity:.6;font-style:italic}
 /* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转）。
        此处只做布局微调：左列高度收紧；.gv-scroll 保留原生横向滚动（时间轴），但不再拦截触摸事件，
@@ -1041,6 +1044,7 @@
       var steps = (ev && ev.steps && ev.steps.length) ? ev.steps : null;
       var stepImg = (ev && ev.stepImg) ? ev.stepImg : null;
       var tips = (ev && ev.tips && ev.tips !== '—') ? ev.tips : '/';
+      var tipsImg = (ev && ev.tipsImg) ? ev.tipsImg : null;
       var owners = (ev && ev.owners && ev.owners.length) ? ev.owners : null;
 
       body += row('ID', '#' + seq);
@@ -1057,7 +1061,7 @@
         ? '<ul class="gv-steps">' + steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
           (stepImg ? '<img class="gv-stepimg" src="' + esc(stepImg) + '" alt="执行步骤配图" loading="lazy">' : '')
         : (stepImg ? '<img class="gv-stepimg" src="' + esc(stepImg) + '" alt="执行步骤配图" loading="lazy">' : '/'));
-      body += row('备注', esc(tips));
+      body += row('备注', esc(tips) + (tipsImg ? '<img class="gv-tipsimg" src="' + esc(tipsImg) + '" alt="备注配图" loading="lazy">' : ''));
       body += row('负责的班委', owners
         ? owners.map(function (o) {
           return '<span class="gv-owner">' + esc(o.name) + (o.role ? '（' + esc(o.role) + '）' : '') + '</span>';
@@ -1106,6 +1110,19 @@
           lb.className = 'gv-lightbox';
           var img = document.createElement('img');
           img.src = stepImgEl.src; img.alt = '执行步骤配图大图';
+          lb.appendChild(img);
+          lb.addEventListener('click', function () { lb.remove(); });
+          (root || document.body).appendChild(lb);
+        });
+      }
+      /* v20：备注配图点击 → 同款灯箱 */
+      var tipsImgEl = drawer.querySelector('.gv-tipsimg');
+      if (tipsImgEl) {
+        tipsImgEl.addEventListener('click', function () {
+          var lb = document.createElement('div');
+          lb.className = 'gv-lightbox';
+          var img = document.createElement('img');
+          img.src = tipsImgEl.src; img.alt = '备注配图大图';
           lb.appendChild(img);
           lb.addEventListener('click', function () { lb.remove(); });
           (root || document.body).appendChild(lb);
@@ -1188,9 +1205,82 @@
       form.insertBefore(d, form.querySelector('.f-actions'));
     }
 
-    /* ================= 本地待提交队列（localStorage） =================
-       所有增删改先写到这里（不立即请求 GitHub API），点「保存更改」后统一写回。 */
+    /* ================= 本地待提交队列（localStorage + IndexedDB 双存） =================
+       所有增删改先写到这里（不立即请求 GitHub API），点「保存更改」后统一写回。
+       注意：图片 base64 很容易超过 localStorage 5MB 配额，一旦写入失败会被静默吞掉
+       （旧版 try/catch 空捕获）→ 保存按钮恒 disabled →「保存没反应」。v20 起：
+       ① >200KB 的 dataUrl 自动外迁 IndexedDB，pending 只留 'blb:' 轻量引用；
+       ② 写入失败不再静默，给用户明确告警。 */
     var PENDING_KEY = 'gantt_pending';
+    var IDB_NAME = 'gantt-gv-idb', IDB_STORE = 'blobs';
+    var BIG_LIMIT = 200 * 1024;
+    function idbOpen() {
+      return new Promise(function (resolve, reject) {
+        if (!G.indexedDB) return reject(new Error('当前环境不支持 IndexedDB'));
+        var req = G.indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = function () { try { req.result.createObjectStore(IDB_STORE); } catch (e) {} };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error || new Error('IndexedDB 打开失败')); };
+      });
+    }
+    function idbPut(key, data) {
+      return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put(data, key);
+          tx.oncomplete = resolve;
+          tx.onerror = function () { reject(tx.error); };
+        });
+      });
+    }
+    function idbGet(key) {
+      return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(IDB_STORE, 'readonly');
+          var rq = tx.objectStore(IDB_STORE).get(key);
+          rq.onsuccess = function () { resolve(rq.result); };
+          rq.onerror = function () { reject(rq.error); };
+        });
+      });
+    }
+    /* dataUrl 超限 → 外迁 IndexedDB，返回 'blb:*' 轻量引用（异步写库，失败静默降级为原值） */
+    function extDataUrl(v, slug) {
+      if (v && v.indexOf('data:') === 0 && v.length > BIG_LIMIT) {
+        var k = 'blb:' + slug + ':' + Math.random().toString(36).slice(2, 8);
+        idbPut(k, v).catch(function () {});
+        return k;
+      }
+      return v;
+    }
+    /* 深度外迁 pending 中所有超限 dataUrl（不影响原对象，返回新对象） */
+    function externalizePending(cur) {
+      var next = null;
+      function extFrom(src) {
+        if (!src || typeof src !== 'object') return;
+        src.forEach && src.forEach(function (u) { if (u && u.dataUrl) u.dataUrl = extDataUrl(u.dataUrl, (u.id || 'a') + '-' + (u.name || 'd')); });
+      }
+      if (cur.events) {
+        next = JSON.parse(JSON.stringify(cur));
+        ['sampleUrl', 'stepImg', 'tipsImg'].forEach(function (f) {
+          Object.keys(next.events).forEach(function (kid) { if (next.events[kid] && next.events[kid][f]) next.events[kid][f] = extDataUrl(next.events[kid][f], f + '-' + kid); });
+        });
+        Object.keys(next.events).forEach(function (kid) {
+          var ats = next.events[kid] && next.events[kid].attachments;
+          if (ats) ats.forEach(function (a, i) { if (a && a.url) a.url = extDataUrl(a.url, 'att-' + kid + '-' + i); });
+        });
+        ['sampleUploads', 'stepImgUploads', 'tipsImgUploads', 'attUploads'].forEach(function (qn) {
+          extFrom(next[qn]);
+        });
+        return next;
+      }
+      next = {};
+      Object.keys(cur).forEach(function (k) { next[k] = cur[k]; });
+      /* 无 events 分支（纯 gantt 改动）：仍外迁队列里的超限 dataUrl */
+      ['sampleUploads', 'stepImgUploads', 'tipsImgUploads', 'attUploads'].forEach(function (qn) {
+        if (next[qn]) next[qn] = next[qn].map(function (u) { if (u && u.dataUrl) return Object.assign({}, u, { dataUrl: extDataUrl(u.dataUrl, (u.id || 'a') + '-' + (u.name || 'd')) }); return u; });
+      });
+      return next;
+    }
     function loadPending() {
       try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch (e) { return null; }
     }
@@ -1199,22 +1289,72 @@
       if (partial.ganttCode !== undefined) cur.ganttCode = partial.ganttCode;
       if (partial.events !== undefined) cur.events = partial.events;
       if (partial.desc !== undefined) cur.desc = partial.desc;
-      /* v17：待上传示例图队列（dataUrl 仅在内存/本轮 pending；上传成功后的事件写回用 raw 直链） */
+      /* v17：待上传示例图队列 */
       if (partial.sampleUploads !== undefined) cur.sampleUploads = partial.sampleUploads || [];
-      /* v19：待上传步骤图队列 + 附件队列（同 v17 模式：dataUrl 暂存，上传后用 raw 直链写回 events） */
+      /* v19：待上传步骤图队列 + 附件队列 */
       if (partial.stepImgUploads !== undefined) cur.stepImgUploads = partial.stepImgUploads || [];
       if (partial.attUploads !== undefined) cur.attUploads = partial.attUploads || [];
-      try { localStorage.setItem(PENDING_KEY, JSON.stringify(cur)); } catch (e) {}
+      /* v20：待上传备注图队列 */
+      if (partial.tipsImgUploads !== undefined) cur.tipsImgUploads = partial.tipsImgUploads || [];
+      /* v20：超限 dataUrl 外迁 IndexedDB 后才写 localStorage（防止配额爆掉导致整包丢失） */
+      cur = externalizePending(cur);
+      try {
+        localStorage.setItem(PENDING_KEY, JSON.stringify(cur));
+        return true;
+      } catch (e) {
+        console.error('[gantt] 本地暂存写入失败：', e);
+        try { alert('⚠️ 本地暂存写入失败（浏览器存储空间不足）。\n请压缩图片（≤500KB）后重试，或先点「保存更改」把已有改动同步到 GitHub。'); } catch (e2) {}
+        return false;
+      }
     }
     function clearPending() {
       try { localStorage.removeItem(PENDING_KEY); } catch (e) {}
+      /* 顺手清理孤儿 blob（量大时才会开） */
+      try {
+        idbOpen().then(function (db) {
+          var tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).clear();
+        }).catch(function () {});
+      } catch (e) {}
+    }
+    /* v20：把 pending 里的 'blb:*' 引用还原为真实 dataUrl（写回/上传前必须还原；原地修改 pending） */
+    function hydratePending(p) {
+      if (!p) return Promise.resolve(p);
+      var keys = [];
+      function scan(v) { if (typeof v === 'string' && v.indexOf('blb:') === 0 && keys.indexOf(v) < 0) keys.push(v); }
+      if (p.events) {
+        Object.keys(p.events).forEach(function (kid) {
+          var e = p.events[kid]; if (!e) return;
+          scan(e.sampleUrl); scan(e.stepImg); scan(e.tipsImg);
+          (e.attachments || []).forEach(function (a) { scan(a && a.url); });
+        });
+      }
+      ['sampleUploads', 'stepImgUploads', 'tipsImgUploads', 'attUploads'].forEach(function (qn) {
+        (p[qn] || []).forEach(function (u) { scan(u && u.dataUrl); });
+      });
+      if (!keys.length) return Promise.resolve(p);
+      return Promise.all(keys.map(function (k) { return idbGet(k).then(function (d) { return { k: k, d: d }; }); })).then(function (pairs) {
+        var map = {};
+        pairs.forEach(function (x) { if (x.d) map[x.k] = x.d; });
+        function fill(v) { return (typeof v === 'string' && map[v]) ? map[v] : v; }
+        if (p.events) Object.keys(p.events).forEach(function (kid) {
+          var e = p.events[kid]; if (!e) return;
+          e.sampleUrl = fill(e.sampleUrl); e.stepImg = fill(e.stepImg); e.tipsImg = fill(e.tipsImg);
+          (e.attachments || []).forEach(function (a) { if (a) a.url = fill(a.url); });
+        });
+        ['sampleUploads', 'stepImgUploads', 'tipsImgUploads', 'attUploads'].forEach(function (qn) {
+          (p[qn] || []).forEach(function (u) { if (u) u.dataUrl = fill(u.dataUrl); });
+        });
+        return p;
+      });
     }
     function hasPending() {
       var p = loadPending();
       return !!(p && (p.ganttCode || p.events ||
         (p.sampleUploads && p.sampleUploads.length) ||
         (p.stepImgUploads && p.stepImgUploads.length) ||
-        (p.attUploads && p.attUploads.length)));
+        (p.attUploads && p.attUploads.length) ||
+        (p.tipsImgUploads && p.tipsImgUploads.length)));
     }
     /* 保存按钮状态：有未提交改动 → 绿色高亮「💾 保存更改」；无 → 灰「✅ 已同步」 */
     function syncSaveBtn() {
@@ -1241,6 +1381,7 @@
       if (!pending || (!pending.ganttCode && !pending.events &&
         !(pending.sampleUploads && pending.sampleUploads.length) &&
         !(pending.stepImgUploads && pending.stepImgUploads.length) &&
+        !(pending.tipsImgUploads && pending.tipsImgUploads.length) &&
         !(pending.attUploads && pending.attUploads.length))) {
         syncSaveBtn(); return Promise.resolve();
       }
@@ -1248,12 +1389,22 @@
       if (saveBtn) { saveBtn.disabled = true; if (!opts.silent) saveBtn.textContent = '保存中…'; }
       var msg = 'sync: ' + (pending.desc || 'batch update');
 
-      /* 先上传三类待传资源（每项仅传一次），返回 { sample:{id:url}, step:{id:url}, att:[{id,name,url}] } */
+      /* v20：写回前先把 pending 里外迁到 IndexedDB 的 'blb:*' 引用还原为真实 dataUrl */
+      return hydratePending(pending).then(function (hp) {
+        pending = hp;
+        return doSaveAll(opts, pending, saveBtn, msg, hydratePending);
+      });
+    }
+    /* 实际执行保存（saveAll 的异步主体，方便 hydrate 后串联） */
+    function doSaveAll(opts, pending, saveBtn, msg, hydrateFn) {
+
+      /* 先上传四类待传资源（每项仅传一次），返回 { sample:{id:url}, step:{id:url}, tips:{id:url}, att:[{id,name,url}] } */
       function uploadAll() {
         var sampleUps = (pending.sampleUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
         var stepUps = (pending.stepImgUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
+        var tipsUps = (pending.tipsImgUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
         var attUps = (pending.attUploads || []).filter(function (u) { return u && u.id && u.name && u.dataUrl; });
-        if (!sampleUps.length && !stepUps.length && !attUps.length) return Promise.resolve({});
+        if (!sampleUps.length && !stepUps.length && !tipsUps.length && !attUps.length) return Promise.resolve({});
         var jobs = [];
         sampleUps.forEach(function (u) {
           jobs.push(Admin.putImage(u.id, u.dataUrl, msg).then(function (url) { return { kind: 'sample', id: u.id, url: url }; }));
@@ -1261,14 +1412,18 @@
         stepUps.forEach(function (u) {
           jobs.push(Admin.putImage(u.id, u.dataUrl, msg).then(function (url) { return { kind: 'step', id: u.id, url: url }; }));
         });
+        tipsUps.forEach(function (u) {
+          jobs.push(Admin.putImage(u.id, u.dataUrl, msg).then(function (url) { return { kind: 'tips', id: u.id, url: url }; }));
+        });
         attUps.forEach(function (u) {
           jobs.push(Admin.putAttachment(u.id, u.name, u.dataUrl, msg).then(function (url) { return { kind: 'att', id: u.id, name: u.name, url: url }; }));
         });
         return Promise.all(jobs).then(function (results) {
-          var acc = { sample: {}, step: {}, att: [] };
+          var acc = { sample: {}, step: {}, tips: {}, att: [] };
           results.forEach(function (r) {
             if (r.kind === 'sample') acc.sample[r.id] = r.url;
             else if (r.kind === 'step') acc.step[r.id] = r.url;
+            else if (r.kind === 'tips') acc.tips[r.id] = r.url;
             else acc.att.push(r);
           });
           return acc;
@@ -1304,6 +1459,9 @@
           });
           Object.keys(res.step || {}).forEach(function (id) {
             if (effEvents[id] && effEvents[id].stepImg && /^data:image\//.test(effEvents[id].stepImg)) effEvents[id].stepImg = res.step[id];
+          });
+          Object.keys(res.tips || {}).forEach(function (id) {
+            if (effEvents[id] && effEvents[id].tipsImg && /^data:image\//.test(effEvents[id].tipsImg)) effEvents[id].tipsImg = res.tips[id];
           });
           (res.att || []).forEach(function (r) {
             var ev = effEvents[r.id];
@@ -1409,7 +1567,9 @@
         '    <div class="f-col"><label>相关同学执行步骤 <span class="f-hint">（每行一步，可配一张步骤图）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea>' +
         '      <div class="f-stepimg"><img id="gv-stepimg-preview" src="' + (ev && ev.stepImg ? esc(ev.stepImg) : '') + '" style="display:' + (ev && ev.stepImg ? 'block' : 'none') + '" alt="步骤图预览"><input type="file" name="stepImgFile" accept="image/png,image/jpeg,image/gif,image/webp"></div>' +
         '</label></div>' +
-        '    <div class="f-col"><label>备注<input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '"></label></div>' +
+        '    <div class="f-col"><label>备注 <span class="f-hint">（可配一张图）</span><input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '">' +
+        '      <div class="f-tipsimg"><img id="gv-tipsimg-preview" src="' + (ev && ev.tipsImg ? esc(ev.tipsImg) : '') + '" style="display:' + (ev && ev.tipsImg ? 'block' : 'none') + '" alt="备注图预览"><input type="file" name="tipsImgFile" accept="image/png,image/jpeg,image/gif,image/webp"></div>' +
+        '</label></div>' +
         '    <div class="f-col"><label>负责的班委 <span class="f-hint">（多选）</span><div class="f-owners">' + ownerBoxes(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }) : []) + '</div></label></div>' +
         '    <div class="f-col"><label>提交材料参考示例 <span class="f-hint">（可选，上传一张图片，全班可见可下载）</span>' +
         '      <div class="f-sample"><img id="gv-sample-preview" src="' + (ev && ev.sampleUrl ? esc(ev.sampleUrl) : '') + '" style="display:' + (ev && ev.sampleUrl ? 'block' : 'none') + '" alt="预览">' +
@@ -1498,6 +1658,38 @@
             window.__stepImgDataUrl = rd.result;
             stepImgPrev.src = rd.result; stepImgPrev.style.display = 'block';
             mkStepRm();
+          };
+          rd.readAsDataURL(f);
+        });
+      }
+
+      /* v20：备注配图上传预览 + 移除（与步骤图同模式） */
+      var tipsImgFile = drawer.querySelector('[name=tipsImgFile]');
+      var tipsImgPrev = drawer.querySelector('#gv-tipsimg-preview');
+      window.__tipsImgDataUrl = (ev && ev.tipsImg) ? ev.tipsImg : null;
+      var tipsRmBtn = null;
+      function mkTipsRm() {
+        if (tipsRmBtn) return;
+        tipsRmBtn = document.createElement('button');
+        tipsRmBtn.type = 'button'; tipsRmBtn.className = 'f-sample-rm'; tipsRmBtn.textContent = '移除备注图';
+        tipsImgFile.parentNode.appendChild(tipsRmBtn);
+        tipsRmBtn.addEventListener('click', function () {
+          window.__tipsImgDataUrl = null; tipsImgFile.value = '';
+          tipsImgPrev.style.display = 'none';
+          tipsRmBtn.remove(); tipsRmBtn = null;
+        });
+      }
+      if (tipsImgPrev.src && tipsImgPrev.style.display !== 'none') mkTipsRm();
+      if (tipsImgFile) {
+        tipsImgFile.addEventListener('change', function () {
+          var f = tipsImgFile.files && tipsImgFile.files[0];
+          if (!f) return;
+          if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { showFormErr(form, '备注图仅支持 png/jpeg/gif/webp 图片'); tipsImgFile.value = ''; return; }
+          var rd = new FileReader();
+          rd.onload = function () {
+            window.__tipsImgDataUrl = rd.result;
+            tipsImgPrev.src = rd.result; tipsImgPrev.style.display = 'block';
+            mkTipsRm();
           };
           rd.readAsDataURL(f);
         });
@@ -1606,6 +1798,7 @@
           });
         }
         var stepImgVal = window.__stepImgDataUrl || (ev ? (ev.stepImg || '') : '');
+        var tipsImgVal = window.__tipsImgDataUrl || (ev ? (ev.tipsImg || '') : '');
         newEvent = {
           short: name,
           who: String(fd.get('who') || '').trim(),
@@ -1616,11 +1809,13 @@
           stepImg: stepImgVal,
           attachments: attsIn,
           tips: String(fd.get('tips') || '').trim(),
+          tipsImg: tipsImgVal,
           sampleUrl: window.__sampleDataUrl || (ev ? (ev.sampleUrl || '') : ''),
           owners: fd.getAll('owner').map(function (n) { return { name: n, role: (eventsData._roles && eventsData._roles[n]) || '' }; })
         };
         window.__sampleDataUrl = null;
         window.__stepImgDataUrl = null;
+        window.__tipsImgDataUrl = null;
       }
 
       var needEvents = false, newEvents = null;
@@ -1649,6 +1844,14 @@
           sups = sups.filter(function (u) { return u.id !== id; });
           sups.push({ id: id, dataUrl: stepVal });
           pendingPartial.stepImgUploads = sups;
+        }
+        /* v20：备注配图入队（同步骤图模式） */
+        var tipsVal = newEvent.tipsImg;
+        if (tipsVal && /^data:image\//.test(tipsVal)) {
+          var tups = (loadPending() || {}).tipsImgUploads || [];
+          tups = tups.filter(function (u) { return u.id !== id; });
+          tups.push({ id: id, dataUrl: tipsVal });
+          pendingPartial.tipsImgUploads = tups;
         }
         var attPend = (form._gvAtts && form._gvAtts.length) ? form._gvAtts.filter(function (a) { return a.dataUrl; }).map(function (a) { return { id: id, name: a.name, dataUrl: a.dataUrl }; }) : [];
         if (attPend.length) {
@@ -1718,9 +1921,17 @@
 
     mount._stopAutoSync = function () { if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; } };
 
+    /* v20：刷新/首载即补一次同步——页面加载完成 1.5s 后，若管理员已登录且本地有待提交改动，
+       自动触发一次静默写回（解决「刚编辑完就刷新，pending 一直滞留本地」的问题）。 */
+    var bootSyncTimer = setTimeout(function () {
+      var adminNow = (G.GanttAdmin && G.GanttAdmin.isLoggedIn) ? G.GanttAdmin.isLoggedIn() : false;
+      if (adminNow && hasPending()) saveAll({ silent: true });
+    }, 1500);
+
     return {
       destroy: function () {
         if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
+        if (bootSyncTimer) { clearTimeout(bootSyncTimer); bootSyncTimer = null; }
         if (mask) { mask.remove(); drawer.remove(); }
         container.removeChild(root);
         container.removeChild(styleEl);

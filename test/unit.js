@@ -126,6 +126,8 @@ k1.forEach(id => {
   /* v19：stepImg（单图）与 attachments（多附件）保持往返一致（默认空也要一致） */
   if ((Events[id].stepImg || '') !== (Events2[id].stepImg || '')) evDiff++;
   if (JSON.stringify(Events[id].attachments || []) !== JSON.stringify(Events2[id].attachments || [])) evDiff++;
+  /* v20：tipsImg（备注单图）保持往返一致 */
+  if ((Events[id].tipsImg || '') !== (Events2[id].tipsImg || '')) evDiff++;
   if (JSON.stringify(Events[id].steps) !== JSON.stringify(Events2[id].steps)) evDiff++;
   if (Events[id].owners.map(o => o.name).join(',') !== Events2[id].owners.map(o => o.name).join(',')) evDiff++;
 });

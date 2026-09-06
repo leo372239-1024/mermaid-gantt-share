@@ -121,6 +121,7 @@
       out.push('      stepImg: ' + jsStr(e.stepImg) + ',');
       out.push('      attachments: ' + JSON.stringify(e.attachments && e.attachments.length ? e.attachments : []) + ',');
       out.push('      tips: ' + jsStr(e.tips) + ',');
+      out.push('      tipsImg: ' + jsStr(e.tipsImg) + ',');
       out.push('      sampleUrl: ' + jsStr(e.sampleUrl) + ',');
       out.push('      owners: ' + ownersCall(e.owners));
       out.push('    },');   /* 每个条目后必带逗号（_roles 恒在末尾） */
