@@ -555,10 +555,10 @@
       }
       S += '</g>';
 
-      /* 今日竖线（黄绿渐变，纵向） */
+      /* 今日竖线（纯红色 #ef4444；SVG 渐变在零宽竖线上 objectBoundingBox 会失效，改用纯色最稳） */
       if (hasTodayInRange) {
         var tx = xOf(today);
-        S += '<g><line x1="' + tx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + tx.toFixed(1) + '" y2="' + totalH + '" stroke="url(#gv-today)" stroke-width="2.2" opacity=".95"/>' +
+        S += '<g><line x1="' + tx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + tx.toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="2.2" opacity=".95"/>' +
           '<text x="' + (tx + 6).toFixed(1) + '" y="' + (AXIS_H - 7) + '" font-size="10.5" font-weight="700" fill="#ef4444">今日</text></g>';
       }
 
