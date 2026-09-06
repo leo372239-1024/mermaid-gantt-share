@@ -975,6 +975,17 @@
 
     /* ---- 详情抽屉 ---- */
     var mask = null, drawer = null;
+    /* 抽屉惰性创建：详情/新增/编辑都可能最先触发（管理员首次点「＋新增」时 drawer 尚不存在）。
+       挂到 .gv-root 内：全屏（.gv-root:fullscreen）时弹窗仍在全屏层内可见。 */
+    function ensureDrawer() {
+      if (!mask || !drawer) {
+        mask = el('div', 'gv-mask');
+        drawer = el('div', 'gv-drawer');
+        root.appendChild(mask);
+        root.appendChild(drawer);
+        mask.addEventListener('click', closeDetail);
+      }
+    }
     function flashTask(id) {
       flashId = id;
       redraw(centerDate());
@@ -993,12 +1004,7 @@
         if (labelRowByTask[task.id]) labelRowByTask[task.id].classList.add('active');
       }
       if (!mask) {
-        mask = el('div', 'gv-mask');
-        drawer = el('div', 'gv-drawer');
-        /* 挂到 .gv-root 内：全屏（.gv-root:fullscreen）时弹窗仍在全屏层内可见 */
-        root.appendChild(mask);
-        root.appendChild(drawer);
-        mask.addEventListener('click', closeDetail);
+        ensureDrawer();
       }
       var st = statusOf(task, today);
       var chips =
@@ -1111,8 +1117,36 @@
       else out[changeId] = changeEvent;
       return out;
     }
-    function reloadAfterSave() {
-      location.href = location.pathname + '?v=' + Date.now();
+    /* 保存/暂存后重渲染：不整页刷新（避免退出全屏）。用最新代码重新解析当前 mount 实例的数据变量，
+       原地重建左列 + 重绘，全屏状态与滚动位置全部保留。 */
+    function reloadAfterSave(code, evData) {
+      if (!code) { var p = loadPending(); code = p ? p.ganttCode : ''; }
+      if (!code) return;
+      if (evData === undefined) evData = eventsData;
+      var newModel = Parser.parse ? Parser.parse(code) : null;
+      if (!newModel || !newModel.range) return;
+      /* 若详情弹窗正打开着（编辑/新增表单或详情），提交/保存后自动关闭，回到甘特图视图 */
+      if (drawer && drawer.classList.contains('on')) closeDetail();
+      /* 更新核心数据变量（闭包内 var，重新赋值即全局生效） */
+      model = newModel;
+      tasksAll = model.all;
+      minDate = dateOnly(model.range.start);
+      maxDate = dateOnly(model.range.end);
+      totalDays = diffDays(minDate, maxDate) + 1;
+      hasTodayInRange = (today >= minDate && today <= maxDate);
+      MAX_VIEW = Math.max(totalDays * 1.02, 400);
+      eventsData = evData || {};
+      /* 重建映射与左列 */
+      secOfTask = {};
+      model.sections.forEach(function (sec) {
+        sec.tasks.forEach(function (t) { secOfTask[t.id] = sec; });
+      });
+      seqById = {};
+      model.all.forEach(function (t, i) { seqById[t.id] = i + 1; });
+      buildLabelList();
+      /* 保持当前视图中心重绘 */
+      redraw(centerDate());
+      syncSaveBtn();
     }
     function showFormErr(form, msg) {
       var old = form.querySelector('.f-err');
@@ -1223,11 +1257,17 @@
             return Admin.serializeEvents(effEvents);
           }));
         }
-        return Promise.all(ops);
-      }).then(function () {
+        return Promise.all(ops).then(function () {
+          return effEvents;
+        });
+      }).then(function (effEvents) {
         clearPending();
         syncSaveBtn();
-        if (!opts.silent) reloadAfterSave();
+        /* 手动保存（非静默）：写回成功后原地重建渲染（不再整页刷新，避免退出全屏）。
+           effEvents 为写回后的正式数据（含 sampleUrl 直链）；无 gantt 改动时沿用当前 model 渲染 */
+        if (!opts.silent) {
+          reloadAfterSave(pending.ganttCode || Admin.serializeGantt(model), effEvents || eventsData);
+        }
       }).catch(function (err) {
         if (saveBtn) saveBtn.disabled = false;
         syncSaveBtn();
@@ -1238,6 +1278,8 @@
 
     /* 渲染编辑/新增表单到抽屉 */
     function renderForm(opts) {
+      /* 抽屉惰性创建：新增/编辑可能比详情更早触发 */
+      ensureDrawer();
       var task = opts.task || null;
       var ev = opts.ev || null;
       var isNew = !!opts.isNew;
@@ -1432,7 +1474,8 @@
       }
       /* 本地暂存改动（不立即请求 GitHub API），点工具栏「保存更改」/每 3 分钟自动同步时统一写回 */
       savePending(pendingPartial);
-      reloadAfterSave();
+      /* 原地重渲染（不整页刷新，避免退出全屏）：用刚暂存的数据重建左列 + 重绘 */
+      reloadAfterSave(Admin.serializeGantt(newModel), needEvents ? newEvents : eventsData);
     }
 
     function confirmDelete(task) {
@@ -1463,7 +1506,8 @@
         events: ev ? buildEvents(task.id, null) : undefined,
         desc: msg
       });
-      reloadAfterSave();
+      /* 原地重渲染（不整页刷新，避免退出全屏） */
+      reloadAfterSave(Admin.serializeGantt(newModel), ev ? buildEvents(task.id, null) : eventsData);
     }
 
     /* 首次定位：今日（今日超出图范围则定位到数据末端） */
