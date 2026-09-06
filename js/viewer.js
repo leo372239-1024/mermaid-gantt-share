@@ -178,6 +178,19 @@
 .gv-form .f-sample .f-sample-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .gv-form .f-sample input[type=file]{font-size:12px;width:100%;max-width:220px}
 .gv-form .f-sample .f-sample-rm{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
+/* v19：执行步骤配图 + 多文件附件 */
+.gv-stepimg{display:block;max-width:280px;max-height:200px;border-radius:12px;border:1px solid #e2e8f0;margin:8px 0 2px;cursor:zoom-in;box-shadow:0 4px 12px -6px rgba(15,23,42,.18)}
+.gv-att{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.gv-att a{display:inline-flex;align-items:center;gap:5px;background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;
+  border-radius:8px;padding:5px 11px;font-size:12.5px;font-weight:600;text-decoration:none;transition:background .15s}
+.gv-att a:hover{background:#e0e7ff;text-decoration:none}
+.gv-att .gv-att-ico{font-size:14px}
+.gv-form .f-attlist{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.gv-form .f-att-row{display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:5px 10px}
+.gv-form .f-att-row .nm{flex:1;font-size:12.5px;color:#334155;word-break:break-all}
+.gv-form .f-att-row .rm{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:7px;
+  padding:3px 9px;font-size:11.5px;cursor:pointer}
+.gv-form .f-stepimg img{max-width:160px;max-height:120px;border-radius:10px;border:1px solid #e2e8f0;margin:4px 0}
 .coming{opacity:.6;font-style:italic}
 /* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转）。
        此处只做布局微调：左列高度收紧；.gv-scroll 保留原生横向滚动（时间轴），但不再拦截触摸事件，
@@ -1024,7 +1037,9 @@
       var when = (ev && ev.when) ? ev.when : timeRange;
       var where = (ev && ev.where) ? ev.where : '由负责的班委确定，联系负责的班委同学';
       var files = (ev && ev.files && ev.files !== '—') ? ev.files : '见于班级通知群';
+      var atts = (ev && ev.attachments && ev.attachments.length) ? ev.attachments : null;
       var steps = (ev && ev.steps && ev.steps.length) ? ev.steps : null;
+      var stepImg = (ev && ev.stepImg) ? ev.stepImg : null;
       var tips = (ev && ev.tips && ev.tips !== '—') ? ev.tips : '/';
       var owners = (ev && ev.owners && ev.owners.length) ? ev.owners : null;
 
@@ -1033,12 +1048,17 @@
       body += row('面向对象', esc(who));
       body += row('时间要求', esc(when));
       body += row('地点', esc(where));
-      body += row('用到的文件材料等', esc(files));
+      body += row('用到的文件材料等', esc(files) + (atts
+        ? '<div class="gv-att">' + atts.map(function (a) {
+          return '<a href="' + esc(a.url) + '" target="_blank" rel="noopener" download><span class="gv-att-ico">📎</span>' + esc(a.name) + '</a>';
+        }).join('') + '</div>'
+        : ''));
       body += row('相关同学执行步骤', steps
-        ? '<ul class="gv-steps">' + steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'
-        : '/');
+        ? '<ul class="gv-steps">' + steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+          (stepImg ? '<img class="gv-stepimg" src="' + esc(stepImg) + '" alt="执行步骤配图" loading="lazy">' : '')
+        : (stepImg ? '<img class="gv-stepimg" src="' + esc(stepImg) + '" alt="执行步骤配图" loading="lazy">' : '/'));
       body += row('备注', esc(tips));
-      body += row('责任的班委', owners
+      body += row('负责的班委', owners
         ? owners.map(function (o) {
           return '<span class="gv-owner">' + esc(o.name) + (o.role ? '（' + esc(o.role) + '）' : '') + '</span>';
         }).join('')
@@ -1073,6 +1093,19 @@
           lb.className = 'gv-lightbox';
           var img = document.createElement('img');
           img.src = thumb.src; img.alt = '示例大图';
+          lb.appendChild(img);
+          lb.addEventListener('click', function () { lb.remove(); });
+          (root || document.body).appendChild(lb);
+        });
+      }
+      /* v19：执行步骤配图点击 → 同款灯箱 */
+      var stepImgEl = drawer.querySelector('.gv-stepimg');
+      if (stepImgEl) {
+        stepImgEl.addEventListener('click', function () {
+          var lb = document.createElement('div');
+          lb.className = 'gv-lightbox';
+          var img = document.createElement('img');
+          img.src = stepImgEl.src; img.alt = '执行步骤配图大图';
           lb.appendChild(img);
           lb.addEventListener('click', function () { lb.remove(); });
           (root || document.body).appendChild(lb);
@@ -1168,6 +1201,9 @@
       if (partial.desc !== undefined) cur.desc = partial.desc;
       /* v17：待上传示例图队列（dataUrl 仅在内存/本轮 pending；上传成功后的事件写回用 raw 直链） */
       if (partial.sampleUploads !== undefined) cur.sampleUploads = partial.sampleUploads || [];
+      /* v19：待上传步骤图队列 + 附件队列（同 v17 模式：dataUrl 暂存，上传后用 raw 直链写回 events） */
+      if (partial.stepImgUploads !== undefined) cur.stepImgUploads = partial.stepImgUploads || [];
+      if (partial.attUploads !== undefined) cur.attUploads = partial.attUploads || [];
       try { localStorage.setItem(PENDING_KEY, JSON.stringify(cur)); } catch (e) {}
     }
     function clearPending() {
@@ -1175,7 +1211,10 @@
     }
     function hasPending() {
       var p = loadPending();
-      return !!(p && (p.ganttCode || p.events));
+      return !!(p && (p.ganttCode || p.events ||
+        (p.sampleUploads && p.sampleUploads.length) ||
+        (p.stepImgUploads && p.stepImgUploads.length) ||
+        (p.attUploads && p.attUploads.length)));
     }
     /* 保存按钮状态：有未提交改动 → 绿色高亮「💾 保存更改」；无 → 灰「✅ 已同步」 */
     function syncSaveBtn() {
@@ -1193,29 +1232,46 @@
         btn.title = '当前无未保存的改动';
       }
     }
-    /* 统一提交：读 pending → 先上传新示例图片（若 pending.sampleUploads）→
+    /* 统一提交：读 pending → 先上传新资源（示例图/步骤图/附件）→
        再写回 gantt.md / events.js（带 sha 防覆盖，冲突自动重试）→ 清空并刷新。
        opts.silent=true 供每 3 分钟自动同步调用（失败不弹窗，只写状态条）。返回 Promise。 */
     function saveAll(opts) {
       opts = opts || {};
       var pending = loadPending();
-      if (!pending || (!pending.ganttCode && !pending.events && !(pending.sampleUploads && pending.sampleUploads.length))) {
+      if (!pending || (!pending.ganttCode && !pending.events &&
+        !(pending.sampleUploads && pending.sampleUploads.length) &&
+        !(pending.stepImgUploads && pending.stepImgUploads.length) &&
+        !(pending.attUploads && pending.attUploads.length))) {
         syncSaveBtn(); return Promise.resolve();
       }
       var saveBtn = toolbar.querySelector('[data-act="save"]');
       if (saveBtn) { saveBtn.disabled = true; if (!opts.silent) saveBtn.textContent = '保存中…'; }
       var msg = 'sync: ' + (pending.desc || 'batch update');
 
-      /* 先把改动的示例图片上传到仓库，拿到 raw 直链写信回 events（每张仅传一次） */
-      function uploadSamples() {
-        var ups = (pending.sampleUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
-        if (!ups.length) return Promise.resolve(null);
-        return Promise.all(ups.map(function (u) {
-          return Admin.putImage(u.id, u.dataUrl, msg).then(function (url) {
-            return { id: u.id, url: url };
+      /* 先上传三类待传资源（每项仅传一次），返回 { sample:{id:url}, step:{id:url}, att:[{id,name,url}] } */
+      function uploadAll() {
+        var sampleUps = (pending.sampleUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
+        var stepUps = (pending.stepImgUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
+        var attUps = (pending.attUploads || []).filter(function (u) { return u && u.id && u.name && u.dataUrl; });
+        if (!sampleUps.length && !stepUps.length && !attUps.length) return Promise.resolve({});
+        var jobs = [];
+        sampleUps.forEach(function (u) {
+          jobs.push(Admin.putImage(u.id, u.dataUrl, msg).then(function (url) { return { kind: 'sample', id: u.id, url: url }; }));
+        });
+        stepUps.forEach(function (u) {
+          jobs.push(Admin.putImage(u.id, u.dataUrl, msg).then(function (url) { return { kind: 'step', id: u.id, url: url }; }));
+        });
+        attUps.forEach(function (u) {
+          jobs.push(Admin.putAttachment(u.id, u.name, u.dataUrl, msg).then(function (url) { return { kind: 'att', id: u.id, name: u.name, url: url }; }));
+        });
+        return Promise.all(jobs).then(function (results) {
+          var acc = { sample: {}, step: {}, att: [] };
+          results.forEach(function (r) {
+            if (r.kind === 'sample') acc.sample[r.id] = r.url;
+            else if (r.kind === 'step') acc.step[r.id] = r.url;
+            else acc.att.push(r);
           });
-        })).then(function (results) {
-          return results.reduce(function (acc, r) { acc[r.id] = r.url; return acc; }, {});
+          return acc;
         });
       }
 
@@ -1237,14 +1293,30 @@
         return attempt(3);
       }
 
-      return uploadSamples().then(function (urlMap) {
+      return uploadAll().then(function (res) {
         var ops = [];
         var effEvents = pending.events;
-        if (urlMap && effEvents) {
-          /* 图片直链合并进 events：sampleUrl 已是新直链则不动（保留本地 dataUrl 只在内存态，序列化取 url） */
+        if (res && effEvents) {
+          /* 上传直链合并进 events：仅当 events 里还是本地 dataUrl 时才替换（保留已有 raw 直链） */
           effEvents = JSON.parse(JSON.stringify(effEvents));
-          Object.keys(urlMap).forEach(function (id) {
-            if (effEvents[id]) effEvents[id].sampleUrl = urlMap[id];
+          Object.keys(res.sample || {}).forEach(function (id) {
+            if (effEvents[id] && effEvents[id].sampleUrl && /^data:image\//.test(effEvents[id].sampleUrl)) effEvents[id].sampleUrl = res.sample[id];
+          });
+          Object.keys(res.step || {}).forEach(function (id) {
+            if (effEvents[id] && effEvents[id].stepImg && /^data:image\//.test(effEvents[id].stepImg)) effEvents[id].stepImg = res.step[id];
+          });
+          (res.att || []).forEach(function (r) {
+            var ev = effEvents[r.id];
+            if (!ev) return;
+            /* 新增附件以 dataUrl 形式已在 events 里（本地可预览）→ 上传后替换为 raw 直链；若缺失则追加 */
+            var atts = ev.attachments || [];
+            var idx = -1;
+            for (var i = 0; i < atts.length; i++) {
+              if (atts[i].name === r.name && /^data:/.test(atts[i].url || '')) { idx = i; break; }
+            }
+            if (idx >= 0) atts[idx] = { name: r.name, url: r.url };
+            else atts.push({ name: r.name, url: r.url });
+            ev.attachments = atts;
           });
         }
         if (pending.ganttCode) {
@@ -1330,10 +1402,15 @@
         '      <div class="f-col"><label>时间要求<input type="text" name="when" value="' + esc(ev ? ev.when : '') + '"></label></div>' +
         '    </div>' +
         '    <div class="f-col"><label>地点 <span class="f-hint">（默认：由负责的班委确定，联系负责的班委同学）</span><input type="text" name="where" value="' + esc(ev ? ev.where : '') + '" placeholder="由负责的班委确定，联系负责的班委同学"></label></div>' +
-        '    <div class="f-col"><label>用到的文件材料等 <span class="f-hint">（默认：见于班级通知群）</span><input type="text" name="files" value="' + esc(ev ? ev.files : '') + '" placeholder="见于班级通知群"></label></div>' +
-        '    <div class="f-col"><label>相关同学执行步骤 <span class="f-hint">（每行一步）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea></label></div>' +
+        '    <div class="f-col"><label>用到的文件材料等 <span class="f-hint">（默认：见于班级通知群；可上传多个附件，全班可下载）</span><input type="text" name="files" value="' + esc(ev && ev.files && ev.files !== '—' ? ev.files : '') + '" placeholder="见于班级通知群">' +
+        '      <div class="f-attlist" id="gv-attlist">' + (ev && ev.attachments ? ev.attachments.map(function (a, i) { return '<div class="f-att-row" data-i="' + i + '"><span class="nm">📎 ' + esc(a.name) + '</span><button type="button" class="rm" data-act="rm-att">移除</button></div>'; }).join('') : '') + '</div>' +
+        '      <div class="f-att-add"><input type="file" name="attFiles" multiple></div>' +
+        '</label></div>' +
+        '    <div class="f-col"><label>相关同学执行步骤 <span class="f-hint">（每行一步，可配一张步骤图）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea>' +
+        '      <div class="f-stepimg"><img id="gv-stepimg-preview" src="' + (ev && ev.stepImg ? esc(ev.stepImg) : '') + '" style="display:' + (ev && ev.stepImg ? 'block' : 'none') + '" alt="步骤图预览"><input type="file" name="stepImgFile" accept="image/png,image/jpeg,image/gif,image/webp"></div>' +
+        '</label></div>' +
         '    <div class="f-col"><label>备注<input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '"></label></div>' +
-        '    <div class="f-col"><label>责任的班委 <span class="f-hint">（多选）</span><div class="f-owners">' + ownerBoxes(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }) : []) + '</div></label></div>' +
+        '    <div class="f-col"><label>负责的班委 <span class="f-hint">（多选）</span><div class="f-owners">' + ownerBoxes(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }) : []) + '</div></label></div>' +
         '    <div class="f-col"><label>提交材料参考示例 <span class="f-hint">（可选，上传一张图片，全班可见可下载）</span>' +
         '      <div class="f-sample"><img id="gv-sample-preview" src="' + (ev && ev.sampleUrl ? esc(ev.sampleUrl) : '') + '" style="display:' + (ev && ev.sampleUrl ? 'block' : 'none') + '" alt="预览">' +
         '      <div class="f-sample-actions"><input type="file" name="sampleFile" accept="image/png,image/jpeg,image/gif,image/webp">' +
@@ -1394,6 +1471,82 @@
         });
       }
 
+      /* v19：执行步骤配图上传预览 + 移除（与 v17 示例图同模式，用全局暂存变量） */
+      var stepImgFile = drawer.querySelector('[name=stepImgFile]');
+      var stepImgPrev = drawer.querySelector('#gv-stepimg-preview');
+      window.__stepImgDataUrl = (ev && ev.stepImg) ? ev.stepImg : null;
+      var stepRmBtn = null;
+      function mkStepRm() {
+        if (stepRmBtn) return;
+        stepRmBtn = document.createElement('button');
+        stepRmBtn.type = 'button'; stepRmBtn.className = 'f-sample-rm'; stepRmBtn.textContent = '移除步骤图';
+        stepImgFile.parentNode.appendChild(stepRmBtn);
+        stepRmBtn.addEventListener('click', function () {
+          window.__stepImgDataUrl = null; stepImgFile.value = '';
+          stepImgPrev.style.display = 'none';
+          stepRmBtn.remove(); stepRmBtn = null;
+        });
+      }
+      if (stepImgPrev.src && stepImgPrev.style.display !== 'none') mkStepRm();
+      if (stepImgFile) {
+        stepImgFile.addEventListener('change', function () {
+          var f = stepImgFile.files && stepImgFile.files[0];
+          if (!f) return;
+          if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { showFormErr(form, '步骤图仅支持 png/jpeg/gif/webp 图片'); stepImgFile.value = ''; return; }
+          var rd = new FileReader();
+          rd.onload = function () {
+            window.__stepImgDataUrl = rd.result;
+            stepImgPrev.src = rd.result; stepImgPrev.style.display = 'block';
+            mkStepRm();
+          };
+          rd.readAsDataURL(f);
+        });
+      }
+
+      /* v19：文件材料附件——多文件选择 → 立即加入待传列表（dataUrl 暂存内存，随保存统一上传） */
+      var attList = drawer.querySelector('#gv-attlist');
+      var attFilesIn = drawer.querySelector('[name=attFiles]');
+      var pendingAtts = [];                    /* [{name, dataUrl}] 新增待传附件（含本表单新增） */
+      if (attFilesIn) {
+        attFilesIn.addEventListener('change', function () {
+          var fl = attFilesIn.files;
+          for (var i = 0; i < fl.length; i++) {
+            var f = fl[i];
+            if (f.size > 3 * 1024 * 1024) { showFormErr(form, '附件「' + f.name + '」超过 3MB，请压缩后重试'); continue; }
+            (function (file) {
+              var rd = new FileReader();
+              rd.onload = function () {
+                allAtts.push({ name: file.name, dataUrl: rd.result });
+                renderAttList();
+              };
+              rd.readAsDataURL(file);
+            })(f);
+          }
+          attFilesIn.value = '';
+        });
+      }
+      var allAtts = ((ev && ev.attachments) ? ev.attachments.map(function (a) { return { name: a.name, url: a.url }; }) : []).concat(pendingAtts);
+      function renderAttList() {
+        if (!attList) return;
+        attList.innerHTML = allAtts.map(function (a, idx) {
+          return '<div class="f-att-row" data-i="' + idx + '"><span class="nm">📎 ' + esc(a.name) + '</span>' +
+            (a.url ? '<a href="' + esc(a.url) + '" target="_blank" rel="noopener" download style="font-size:11.5px">已有</a>' : '') +
+            '<button type="button" class="rm" data-act="rm-att">移除</button></div>';
+        }).join('');
+        attList.querySelectorAll('[data-act=rm-att]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var idx = +btn.parentNode.getAttribute('data-i');
+            allAtts.splice(idx, 1);
+            renderAttList();
+          });
+        });
+      }
+      renderAttList();
+
+      /* 附件列表暴露给 handleSubmit 读取：表单内新增附件（dataUrl）+ 已有附件（url）合并 */
+      var crudForm = drawer.querySelector('#gv-crudform');
+      if (crudForm) crudForm._gvAtts = allAtts;
+
       mask.classList.add('on');
       drawer.classList.add('on');
       document.body.style.overflow = 'hidden';
@@ -1440,6 +1593,19 @@
 
       var newEvent = null;
       if (isEvent) {
+        /* v19：附件 = 既有已上传（url）+ 本次新增（dataUrl 也写入 events，本地可预览；saveAll 上传成功后替换为 raw 直链） */
+        var attsIn = [];
+        var attsPending = [];
+        if (form._gvAtts && form._gvAtts.length) {
+          form._gvAtts.forEach(function (a) {
+            if (a.url) attsIn.push({ name: a.name, url: a.url });
+            else {
+              attsPending.push({ name: a.name, dataUrl: a.dataUrl });
+              attsIn.push({ name: a.name, url: a.dataUrl });
+            }
+          });
+        }
+        var stepImgVal = window.__stepImgDataUrl || (ev ? (ev.stepImg || '') : '');
         newEvent = {
           short: name,
           who: String(fd.get('who') || '').trim(),
@@ -1447,11 +1613,14 @@
           where: String(fd.get('where') || '').trim(),
           files: String(fd.get('files') || '').trim(),
           steps: String(fd.get('steps') || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
+          stepImg: stepImgVal,
+          attachments: attsIn,
           tips: String(fd.get('tips') || '').trim(),
           sampleUrl: window.__sampleDataUrl || (ev ? (ev.sampleUrl || '') : ''),
           owners: fd.getAll('owner').map(function (n) { return { name: n, role: (eventsData._roles && eventsData._roles[n]) || '' }; })
         };
         window.__sampleDataUrl = null;
+        window.__stepImgDataUrl = null;
       }
 
       var needEvents = false, newEvents = null;
@@ -1471,6 +1640,23 @@
         ups = ups.filter(function (u) { return u.id !== id; });
         ups.push({ id: id, dataUrl: sampleUrlVal });
         pendingPartial.sampleUploads = ups;
+      }
+      /* v19：执行步骤配图 + 附件入队（同一 id 下旧队列先清掉，避免残留） */
+      if (newEvent) {
+        var stepVal = newEvent.stepImg;
+        if (stepVal && /^data:image\//.test(stepVal)) {
+          var sups = (loadPending() || {}).stepImgUploads || [];
+          sups = sups.filter(function (u) { return u.id !== id; });
+          sups.push({ id: id, dataUrl: stepVal });
+          pendingPartial.stepImgUploads = sups;
+        }
+        var attPend = (form._gvAtts && form._gvAtts.length) ? form._gvAtts.filter(function (a) { return a.dataUrl; }).map(function (a) { return { id: id, name: a.name, dataUrl: a.dataUrl }; }) : [];
+        if (attPend.length) {
+          var aups = (loadPending() || {}).attUploads || [];
+          aups = aups.filter(function (u) { return !(u.id === id && attPend.some(function (ap) { return ap.name === u.name; })); });
+          aups = aups.concat(attPend);
+          pendingPartial.attUploads = aups;
+        }
       }
       /* 本地暂存改动（不立即请求 GitHub API），点工具栏「保存更改」/每 3 分钟自动同步时统一写回 */
       savePending(pendingPartial);

@@ -118,6 +118,8 @@
       out.push('      where: ' + jsStr(e.where) + ',');
       out.push('      files: ' + jsStr(e.files) + ',');
       out.push('      steps: ' + jsArr(e.steps) + ',');
+      out.push('      stepImg: ' + jsStr(e.stepImg) + ',');
+      out.push('      attachments: ' + JSON.stringify(e.attachments && e.attachments.length ? e.attachments : []) + ',');
       out.push('      tips: ' + jsStr(e.tips) + ',');
       out.push('      sampleUrl: ' + jsStr(e.sampleUrl) + ',');
       out.push('      owners: ' + ownersCall(e.owners));
@@ -203,7 +205,34 @@
     });
   }
 
-  /* 图片上传到仓库 samples/ 并返回 raw 直链（供事件「提交材料参考示例」使用）。
+  /* 资源直链：raw.githubusercontent 前缀拼装（path 需 encodeURIComponent 兼容中文文件名） */
+  function rawUrl(p) {
+    return 'https://raw.githubusercontent.com/' + REPO.owner + '/' + REPO.repo + '/' + REPO.branch + '/' +
+      p.split('/').map(encodeURIComponent).join('/');
+  }
+  /* 通用资源上传：base64 原样写回仓库指定路径（UTF-8 转码会破坏二进制），返回 raw 直链 */
+  function putAsset(p, b64, message) {
+    return fetch(API_BASE + p, {
+      method: 'PUT',
+      headers: Object.assign(authHeaders(), { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        message: message || ('asset: ' + p),
+        content: b64,
+        branch: REPO.branch
+      })
+    }).then(function (res) {
+      if (!res.ok) return res.json().then(function (j) { throw new Error('上传资源失败：' + (j.message || res.status)); });
+      return rawUrl(p);
+    });
+  }
+  /* 解析 dataUrl → { b64, ext, mime }；仅限图片与非图片通用（附件支持任意小文件） */
+  function parseDataUrl(dataUrl) {
+    var m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(String(dataUrl || ''));
+    if (!m) return null;
+    return { mime: m[1], b64: (m[2] ? m[3] : null), raw: !m[2] };
+  }
+
+  /* 图片上传到仓库 samples/ 并返回 raw 直链（供事件「提交材料参考示例」/「执行步骤图」使用）。
      文件名规则：{id}_{yyyyMMdd_HHmmss}{ext}，天然幂等且避免与他人并发重名。 */
   function putImage(id, dataUrl, message) {
     var m = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/.exec(String(dataUrl || ''));
@@ -214,18 +243,21 @@
     var p = 'samples/' + String(id).replace(/[^A-Za-z0-9_-]/g, '') + '_' +
       now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + '_' +
       p2(now.getHours()) + p2(now.getMinutes()) + p2(now.getSeconds()) + ext;
-    return fetch(API_BASE + p, {
-      method: 'PUT',
-      headers: Object.assign(authHeaders(), { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        message: message || ('sample: ' + p),
-        content: m[2],                                 /* base64 原样写入（UTF-8 转码会破坏二进制） */
-        branch: REPO.branch
-      })
-    }).then(function (res) {
-      if (!res.ok) return res.json().then(function (j) { throw new Error('上传图片失败：' + (j.message || res.status)); });
-      return 'https://raw.githubusercontent.com/' + REPO.owner + '/' + REPO.repo + '/' + REPO.branch + '/' + p;
-    });
+    return putAsset(p, m[2], message || ('sample: ' + p));
+  }
+
+  /* 附件上传到仓库 files/ 并返回 raw 直链（供「用到的文件材料等」多文件附件使用）。
+     文件名规则：{id}_{yyyyMMdd_HHmmss}_{原始名}，中文名经 encodeURIComponent 后可访问可下载。 */
+  function putAttachment(id, fileName, dataUrl, message) {
+    var p = parseDataUrl(dataUrl);
+    if (!p || !p.b64) return Promise.reject(new Error('附件数据格式无效'));
+    var safeName = String(fileName || 'file').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60);
+    var now = new Date();
+    function p2(n) { return n < 10 ? '0' + n : '' + n; }
+    var pth = 'files/' + String(id).replace(/[^A-Za-z0-9_-]/g, '') + '_' +
+      now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + '_' +
+      p2(now.getHours()) + p2(now.getMinutes()) + p2(now.getSeconds()) + '_' + safeName;
+    return putAsset(pth, p.b64, message || ('file: ' + pth));
   }
 
   /* 验证令牌是否有效（读一个已知文件，contents:read 即可） */
@@ -254,6 +286,8 @@
     validateToken: validateToken,
     getFile: getFile,
     putFile: putFile,
-    putImage: putImage
+    putImage: putImage,
+    putAttachment: putAttachment,
+    rawUrl: rawUrl
   };
 });
