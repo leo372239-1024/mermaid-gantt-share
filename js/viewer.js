@@ -69,7 +69,7 @@
 .gv-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--gv-sub);margin:2px 4px 8px}
 .gv-legend i{display:inline-block;width:20px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .gv-legend i.dia{width:8px;height:8px;transform:rotate(45deg);border-radius:1.5px}
-.gv-legend i.today{width:2px;height:12px;background:linear-gradient(#FDFC47,#24FE41);margin-right:5px;border-radius:1px}
+.gv-legend i.today{width:2px;height:12px;background:linear-gradient(#ef4444,#dc2626);margin-right:5px;border-radius:1px}
 .gv-legend .hint{opacity:.75}
 .gv-body{display:flex;align-items:stretch;background:var(--gv-card);border:1px solid var(--gv-line);
   border-radius:14px;overflow:hidden;
@@ -121,7 +121,7 @@
 .gv-dsub{font-size:12px;color:var(--gv-sub);margin-bottom:12px;line-height:1.8}
 .gv-chip{display:inline-block;font-size:11px;border-radius:999px;padding:2px 10px;font-weight:600;margin:0 5px 4px 0}
 .gv-chip.c1{background:#fffbeb;color:#92400e}.gv-chip.c2{background:#ecfdf5;color:#065f46}
-.gv-chip.c3{background:#fef2f2;color:#991b1b}.gv-chip.c4{background:#eef2ff;color:#4338ca}
+.gv-chip.c3{background:#f5f3ff;color:#6d28d9}.gv-chip.c4{background:#eef2ff;color:#4338ca}
 .gv-drow{display:flex;gap:10px;padding:9px 0;border-top:1px solid #f1f5f9;font-size:13px}
 .gv-drow .k{flex:0 0 80px;color:var(--gv-sub);font-size:12px;padding-top:2px}
 .gv-drow .v{flex:1 1 auto;color:#1e293b;line-height:1.7;word-break:break-word}
@@ -148,6 +148,11 @@
 .gv-form .f-check{flex-direction:row;align-items:center;gap:8px;font-size:13px;color:#334155;font-weight:600}
 .gv-form .f-check input{width:16px;height:16px;accent-color:#4f46e5}
 .gv-form .f-hint{font-size:11px;color:#94a3b8;font-weight:400}
+.gv-form .f-owners{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.gv-form .f-owner{flex-direction:row;align-items:center;gap:5px;font-size:12.5px;font-weight:500;color:#334155;
+  background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:5px 9px;cursor:pointer}
+.gv-form .f-owner input{width:15px;height:15px;accent-color:#4f46e5;margin:0}
+.gv-form .f-owner:has(input:checked){background:#eef2ff;border-color:#c7d2fe;color:#4338ca}
 .gv-evfields{border:1px solid #eef2ff;background:#fafbff;border-radius:12px;padding:12px}
 .gv-evfields .ev-title{font-size:12px;font-weight:700;color:#4338ca;margin-bottom:10px}
 .gv-form .f-actions{display:flex;gap:8px;margin-top:4px}
@@ -213,13 +218,13 @@
     ['#7c3aed', '#ddd6fe', '#6d28d9'],
     ['#0e7490', '#a5f3fc', '#155e75'],
     ['#047857', '#a7f3d0', '#065f46'],
-    ['#b45309', '#fde68a', '#92400e'],
-    ['#be185d', '#fbcfe8', '#9d174d'],
+    ['#0369a1', '#bae6fd', '#075985'],
+    ['#1d4ed8', '#bfdbfe', '#1e40af'],
     ['#4338ca', '#c7d2fe', '#3730a3'],
     ['#0f766e', '#99f6e4', '#115e59'],
-    ['#c2410c', '#fed7aa', '#9a3412'],
+    ['#15803d', '#bbf7d0', '#166534'],
     ['#4d7c0f', '#d9f99d', '#3f6212'],
-    ['#9f1239', '#fecdd3', '#881337'],
+    ['#6b21a8', '#e9d5ff', '#581c87'],
     ['#0c4a6e', '#bae6fd', '#075985']
   ];
   /* 名称是否已自带括号日期注记（半/全角括号均可，括号内含 "9.5"/"8.1至8.25" 类点号日期） */
@@ -371,11 +376,11 @@
     /* ---- 图例 ---- */
     legendEl.innerHTML =
       '<span><i class="today"></i>今日线(随打开自动更新)</span>' +
-      '<span><i style="background:linear-gradient(90deg,#FDFC47,#24FE41);border-radius:2px"></i>近3天开始·未结束(高亮)</span>' +
+      '<span><i style="background:linear-gradient(90deg,#ef4444,#dc2626);border-radius:2px"></i>近3天开始·未结束(红色高亮)</span>' +
       '<span><i style="background:#cbd5e1"></i>已完成</span>' +
-      '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#b45309"></i>不同事件/节点错色区分</span>' +
+      '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#0e7490"></i>不同事件/节点错色区分</span>' +
       '<span><i class="dia" style="background:#7c3aed"></i>里程碑/当日</span>' +
-      '<span><i style="border:1.5px dashed #dc2626;background:transparent;height:4px;width:16px;border-radius:2px"></i>关键节点(红圈)</span>' +
+      '<span><i style="border:1.5px dashed #6d28d9;background:transparent;height:4px;width:16px;border-radius:2px"></i>关键节点(紫圈)</span>' +
       '<span class="hint">🖱 点条/◆/标题文字/左侧名 → 详情 · 桌面 Ctrl+滚轮缩放</span>';
 
     /* ---- 左侧事件索引（每任务一项；点击=详情+定位高亮） ---- */
@@ -383,6 +388,9 @@
     model.sections.forEach(function (sec) {
       sec.tasks.forEach(function (t) { secOfTask[t.id] = sec; });
     });
+    /* ID 序号（从 1 自增，按 gantt.md 顺序，管理员不可修改，仅展示） */
+    var seqById = {};
+    model.all.forEach(function (t, i) { seqById[t.id] = i + 1; });
     var labelRowByTask = {};
     function buildLabelList() {
       lboxEl.innerHTML = '';
@@ -485,13 +493,14 @@
       function yOfTrack(k) { return AXIS_H + k * rowH; }
 
       var S = '';
-      /* 近期事件高亮渐变 + 今日竖线渐变（黄绿 #FDFC47 → #24FE41），用于「开始日在今天±3天内且未结束」的事件/节点与今日线 */
+      /* 近期事件高亮渐变 + 今日竖线渐变（红色 #ef4444 → #dc2626），用于「开始日在今天±3天内且未结束」的事件/节点与今日线
+         （红色为唯一允许使用的高亮边缘色） */
       S += '<defs>' +
         '<linearGradient id="gv-rainbow" x1="0" y1="0" x2="1" y2="0">' +
-        '<stop offset="0" stop-color="#FDFC47"/><stop offset="1" stop-color="#24FE41"/>' +
+        '<stop offset="0" stop-color="#ef4444"/><stop offset="1" stop-color="#dc2626"/>' +
         '</linearGradient>' +
         '<linearGradient id="gv-today" x1="0" y1="0" x2="0" y2="1">' +
-        '<stop offset="0" stop-color="#FDFC47"/><stop offset="1" stop-color="#24FE41"/>' +
+        '<stop offset="0" stop-color="#ef4444"/><stop offset="1" stop-color="#dc2626"/>' +
         '</linearGradient>' +
         '</defs>';
 
@@ -547,7 +556,7 @@
       if (hasTodayInRange) {
         var tx = xOf(today);
         S += '<g><line x1="' + tx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + tx.toFixed(1) + '" y2="' + totalH + '" stroke="url(#gv-today)" stroke-width="2.2" opacity=".95"/>' +
-          '<text x="' + (tx + 6).toFixed(1) + '" y="' + (AXIS_H - 7) + '" font-size="10.5" font-weight="700" fill="#16a34a">今日</text></g>';
+          '<text x="' + (tx + 6).toFixed(1) + '" y="' + (AXIS_H - 7) + '" font-size="10.5" font-weight="700" fill="#ef4444">今日</text></g>';
       }
 
       /* ================= 绘制事件（两遍：先画条收集占用矩形，再放里程碑与防重叠标注） ================= */
@@ -583,10 +592,10 @@
         var hBar = Math.max(10, Math.min(16, rowH * 0.5));
         var p = palOf(t);
         var barFill, barStroke, inText;
-        if (!p) { barFill = '#cbd5e1'; barStroke = t.crit ? '#b91c1c' : '#94a3b8'; inText = '#475569'; }
+        if (!p) { barFill = '#cbd5e1'; barStroke = t.crit ? '#6d28d9' : '#94a3b8'; inText = '#475569'; }
         else if (st === 'going') { barFill = p[0]; barStroke = p[2]; inText = '#fff'; }
         else { barFill = p[1]; barStroke = p[2]; inText = p[2]; }
-        if (t.crit && p) barStroke = '#b91c1c';           /* crit：红圈强调 */
+        if (t.crit && p) barStroke = '#6d28d9';           /* crit：紫圈强调（关键节点禁用红色） */
         var barY = cy - hBar / 2;
         var rb = isRainbow(t);
         var strokeW = (isFlash ? 2.5 : (t.crit ? 1.8 : 1));
@@ -727,7 +736,7 @@
           var dCol = !p ? '#94a3b8' : ((st === 'going') ? p[0] : p[2]);
           var sz = Math.min(6.5, rowH * 0.22 + 3);
           var rb = isRainbow(t);
-          var dStroke = (isFlash ? '#f59e0b' : (t.crit ? '#b91c1c' : '#fff'));
+          var dStroke = (isFlash ? '#f59e0b' : (t.crit ? '#6d28d9' : '#fff'));
           var dWid = (isFlash ? 2.5 : (t.crit ? 2 : 1));
           var extra = '';
           /* 近期命中 → 节点外加一圈同色红渐变描边菱形（扩大 sz+3.5，与今日线同色） */
@@ -785,7 +794,7 @@
         ' ~ ' + t.getFullYear() + '年' + (t.getMonth() + 1) + '月';
       legendEl.querySelectorAll('.gv-todaytag').forEach(function (e) { e.remove(); });
       var tt = el('span', 'gv-todaytag');
-      tt.style.cssText = 'color:#16a34a;font-size:11.5px';
+      tt.style.cssText = 'color:#ef4444;font-size:11.5px';
       tt.textContent = '（今日 ' + fmtCN(today) + '）';
       legendEl.appendChild(tt);
     }
@@ -983,32 +992,36 @@
 
       var body = '';
       function row(k, v) { return '<div class="gv-drow"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'; }
-      if (ev) {
-        var kvs = [
-          ['面向对象', ev.who], ['关键时间', ev.when], ['地点', ev.where], ['文件/材料', ev.files]
-        ];
-        kvs.forEach(function (p) { if (p[1]) body += row(p[0], esc(p[1])); });
-        if (ev.steps && ev.steps.length) {
-          body += row('执行步骤', '<ul class="gv-steps">' + ev.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>');
-        }
-        if (ev.tips && ev.tips !== '—') body += row('提醒', esc(ev.tips));
-        if (ev.owners && ev.owners.length) {
-          body += row('负责班委', ev.owners.map(function (o) {
-            return '<span class="gv-owner">' + esc(o.name) + (o.role ? '（' + esc(o.role) + '）' : '') + '</span>';
-          }).join(''));
-        }
-        body += row('信息源', '班级通知「班群通知表」2026-09-03');
-      } else {
-        body += row('所在阶段', esc(sec.name));
-        body += row('时间范围', timeRange);
-        body += row('说明', (String(task.name).indexOf('推测') >= 0 || String(sec.name).indexOf('推测') >= 0)
-          ? '2027-2028 学年校历尚未发布，此节点日期为按往年规律推算，请以学校正式通知为准。'
-          : '该事项暂无详细执行说明。');
-      }
+      /* 统一 9 项属性：ID / 名称 / 面向对象 / 时间要求 / 地点 / 文件材料 / 执行步骤 / 备注 / 责任班委；缺省写 "/" */
+      var seq = seqById[task.id] || '';
+      var name = task.name || '';
+      var who = (ev && ev.who) ? ev.who : '/';
+      var when = (ev && ev.when) ? ev.when : timeRange;
+      var where = (ev && ev.where) ? ev.where : '由负责的班委确定，联系负责的班委同学';
+      var files = (ev && ev.files && ev.files !== '—') ? ev.files : '见于班级通知群';
+      var steps = (ev && ev.steps && ev.steps.length) ? ev.steps : null;
+      var tips = (ev && ev.tips && ev.tips !== '—') ? ev.tips : '/';
+      var owners = (ev && ev.owners && ev.owners.length) ? ev.owners : null;
+
+      body += row('ID', '#' + seq);
+      body += row('待办事项名称', esc(name));
+      body += row('面向对象', esc(who));
+      body += row('时间要求', esc(when));
+      body += row('地点', esc(where));
+      body += row('用到的文件材料等', esc(files));
+      body += row('相关同学执行步骤', steps
+        ? '<ul class="gv-steps">' + steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'
+        : '/');
+      body += row('备注', esc(tips));
+      body += row('责任的班委', owners
+        ? owners.map(function (o) {
+          return '<span class="gv-owner">' + esc(o.name) + (o.role ? '（' + esc(o.role) + '）' : '') + '</span>';
+        }).join('')
+        : '/');
 
       drawer.innerHTML =
         '<div class="grab"></div><button class="gv-close" aria-label="关闭">✕</button>' +
-        '<div class="gv-dhead">' + esc(ev ? ev.short : task.name) + '</div>' +
+        '<div class="gv-dhead">' + esc(task.name) + '</div>' +
         '<div class="gv-dsub">' + chips + '<br>' + timeRange + '</div>' + body +
         (isAdmin
           ? '<div class="gv-adminbar">' +
@@ -1141,20 +1154,31 @@
       var secName = task ? ((secOfTask[task.id] && secOfTask[task.id].name) || '') : model.sections[0].name;
       var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
       var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
+      /* 责任班委多选（选项来自 ROLES 表：职务 + 姓名） */
+      function ownerBoxes(selected) {
+        var roles = eventsData._roles || {};
+        var names = Object.keys(roles);
+        if (!names.length) return '<span class="f-hint">暂无班委名单</span>';
+        return names.map(function (n) {
+          var c = selected && selected.indexOf(n) >= 0;
+          return '<label class="f-owner"><input type="checkbox" name="owner" value="' + esc(n) + '"' + (c ? ' checked' : '') + '><span>' + esc(roles[n]) + ' ' + esc(n) + '</span></label>';
+        }).join('');
+      }
 
       drawer.innerHTML =
         '<div class="grab"></div><button class="gv-close" aria-label="关闭">✕</button>' +
         '<div class="gv-dhead">' + (isNew ? '＋ 新增事件' : '✏️ 编辑「' + esc(task.name) + '」') + '</div>' +
         '<form class="gv-form" id="gv-crudform">' +
         '  <div class="f-row">' +
-        '    <div class="f-col" style="flex:2 1 260px"><label>名称<input type="text" name="name" required value="' + esc(task ? task.name : '') + '"></label></div>' +
+        '    <div class="f-col" style="flex:0 0 70px"><label>ID<input type="text" value="' + (isNew ? '#' + (model.all.length + 1) : '#' + (seqById[task.id] || '')) + '" disabled readonly style="background:#f1f5f9;color:#64748b;font-weight:600"></label></div>' +
+        '    <div class="f-col" style="flex:2 1 260px"><label>待办事项名称<input type="text" name="name" required value="' + esc(task ? task.name : '') + '"></label></div>' +
         '    <div class="f-col"><label>阶段<select name="section">' + sectionOptions(secName) + '</select></label></div>' +
         '  </div>' +
         '  <div class="f-row">' +
         '    <div class="f-col"><label>类型<select name="kind">' +
         '      <option value="normal"' + (kind === 'normal' ? ' selected' : '') + '>普通事件（时间范围）</option>' +
         '      <option value="milestone"' + (kind === 'milestone' ? ' selected' : '') + '>时间点 / 里程碑（◆）</option>' +
-        '      <option value="crit"' + (kind === 'crit' ? ' selected' : '') + '>关键节点（红圈）</option>' +
+        '      <option value="crit"' + (kind === 'crit' ? ' selected' : '') + '>关键节点（紫圈）</option>' +
         '    </select></label></div>' +
         '    <div class="f-col"><label>状态<select name="status">' +
         '      <option value="none"' + (status === 'none' ? ' selected' : '') + '>未开始</option>' +
@@ -1170,17 +1194,14 @@
         '  <div class="gv-evfields" id="gv-evfields">' +
         '    <div class="ev-title">事件详情</div>' +
         '    <div class="f-row">' +
-        '      <div class="f-col"><label>卡片标题<input type="text" name="short" value="' + esc(ev ? ev.short : '') + '"></label></div>' +
         '      <div class="f-col"><label>面向对象<input type="text" name="who" value="' + esc(ev ? ev.who : '') + '"></label></div>' +
+        '      <div class="f-col"><label>时间要求<input type="text" name="when" value="' + esc(ev ? ev.when : '') + '"></label></div>' +
         '    </div>' +
-        '    <div class="f-row">' +
-        '      <div class="f-col"><label>关键时间<input type="text" name="when" value="' + esc(ev ? ev.when : '') + '"></label></div>' +
-        '      <div class="f-col"><label>地点<input type="text" name="where" value="' + esc(ev ? ev.where : '') + '"></label></div>' +
-        '    </div>' +
-        '    <div class="f-col"><label>文件/材料<input type="text" name="files" value="' + esc(ev ? ev.files : '') + '"></label></div>' +
-        '    <div class="f-col"><label>执行步骤 <span class="f-hint">（每行一步）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea></label></div>' +
-        '    <div class="f-col"><label>提醒<input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '"></label></div>' +
-        '    <div class="f-col"><label>负责班委 <span class="f-hint">（逗号分隔人名）</span><input type="text" name="owners" value="' + esc(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }).join('，') : '') + '"></label></div>' +
+        '    <div class="f-col"><label>地点 <span class="f-hint">（默认：由负责的班委确定，联系负责的班委同学）</span><input type="text" name="where" value="' + esc(ev ? ev.where : '') + '" placeholder="由负责的班委确定，联系负责的班委同学"></label></div>' +
+        '    <div class="f-col"><label>用到的文件材料等 <span class="f-hint">（默认：见于班级通知群）</span><input type="text" name="files" value="' + esc(ev ? ev.files : '') + '" placeholder="见于班级通知群"></label></div>' +
+        '    <div class="f-col"><label>相关同学执行步骤 <span class="f-hint">（每行一步）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea></label></div>' +
+        '    <div class="f-col"><label>备注<input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '"></label></div>' +
+        '    <div class="f-col"><label>责任的班委 <span class="f-hint">（多选）</span><div class="f-owners">' + ownerBoxes(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }) : []) + '</div></label></div>' +
         '  </div>' +
         '  <div class="f-actions">' +
         '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">✓ 暂存更改</button>' +
@@ -1247,14 +1268,14 @@
       var newEvent = null;
       if (isEvent) {
         newEvent = {
-          short: String(fd.get('short') || '').trim() || name,
+          short: name,
           who: String(fd.get('who') || '').trim(),
           when: String(fd.get('when') || '').trim(),
           where: String(fd.get('where') || '').trim(),
           files: String(fd.get('files') || '').trim(),
           steps: String(fd.get('steps') || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
           tips: String(fd.get('tips') || '').trim(),
-          owners: String(fd.get('owners') || '').split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (n) { return { name: n, role: (eventsData._roles && eventsData._roles[n]) || '' }; })
+          owners: fd.getAll('owner').map(function (n) { return { name: n, role: (eventsData._roles && eventsData._roles[n]) || '' }; })
         };
       }
 
