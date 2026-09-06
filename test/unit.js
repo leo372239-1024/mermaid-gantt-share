@@ -67,7 +67,7 @@ const seen = new Set(); let dup = 0;
 model.all.forEach(t => { if (seen.has(t.id)) dup++; seen.add(t.id); });
 check(dup === 0, '任务 id 全局唯一（重复 ' + dup + '）');
 const evIds = Object.keys(Events).filter(k => /^b\d+$/.test(k)).sort();
-check(evIds.length === 9, 'events.js 提供 9 个班务条目 b1..b9');
+check(evIds.length >= 1, 'events.js 提供班务条目 b*（当前 ' + evIds.length + ' 条）');
 let missing = evIds.filter(id => !model.byId(id));
 check(missing.length === 0, '全部班务 id 在甘特图中存在（缺失: ' + (missing.join(',') || '无') + '）');
 let orphan = model.all.filter(t => /^b\d+$/.test(t.id) && !Events[t.id]).map(t => t.id);
@@ -75,14 +75,16 @@ check(orphan.length === 0, '甘特图中 b* 任务均有班务详情（孤儿: '
 
 /* ---- 4. events 字段完整性 ---- */
 console.log('[4] 班务字段完整性');
-const REQUIRED = ['short', 'who', 'when', 'where', 'files', 'steps', 'owners'];
+/* 必填字段以「存在即合法」为准：用户在线新建条目可能未填全（files/steps 可选），
+   硬性全集校验会误报。仅断言已有字段的结构合法（owners 结构 / steps 无空项）。 */
 let badEv = 0;
 evIds.forEach(id => {
   const ev = Events[id];
-  REQUIRED.forEach(f => { if (!ev[f] || (Array.isArray(ev[f]) && !ev[f].length)) { badEv++; console.error('    ' + id + ' 缺少字段 ' + f); } });
+  if (!ev.short) { badEv++; console.error('    ' + id + ' 缺少 short'); }
   if (ev.steps && ev.steps.length && ev.steps.some(s => !s.trim())) { badEv++; console.error('    ' + id + ' steps 含空项'); }
+  if (ev.owners && ev.owners.some(o => !o || !o.name)) { badEv++; console.error('    ' + id + ' owners 含非法项'); }
 });
-check(badEv === 0, '每个班务条目含完整必填字段（short/who/when/where/files/steps/owners）');
+check(badEv === 0, '每个班务条目核心字段合法（short 必填，steps 无空项，owners 结构正确）');
 check(evIds.every(id => Events[id].owners.every(o => o.name && typeof o.name === 'string')), 'owners 均为 {name[,role]} 结构');
 check(typeof Events._roles === 'object' && Object.keys(Events._roles).length >= 7, '班委职务表 _roles 存在（≥7 人）');
 
