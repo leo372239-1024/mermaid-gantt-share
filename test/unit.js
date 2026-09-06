@@ -91,5 +91,42 @@ console.log('[5] viewer 模块');
 check(!!Viewer && typeof Viewer.mount === 'function', 'viewer.js 暴露 GanttViewer.mount');
 check(!!Parser.parse && !!Parser.fmt, 'parser.js 暴露 parse/fmt');
 
+/* ---- 6. 序列化 round-trip（admin.js 写回 GitHub 前的安全阀） ---- */
+console.log('[6] 序列化 round-trip');
+const Admin = require(path.join(ROOT, 'js', 'admin.js'));
+const serGantt = Admin.serializeGantt(model);
+const model2 = Parser.parse(serGantt);
+let fieldDiff = 0;
+if (model.title !== model2.title) fieldDiff++;
+if (model.sections.length !== model2.sections.length) fieldDiff++;
+if (model.all.length !== model2.all.length) fieldDiff++;
+model.all.forEach(t => {
+  const t2 = model2.byId(t.id);
+  if (!t2) { fieldDiff++; return; }
+  ['milestone', 'crit', 'done', 'active', 'point'].forEach(f => { if (!!t[f] !== !!t2[f]) fieldDiff++; });
+  if (Parser.fmt(t.start) !== Parser.fmt(t2.start)) fieldDiff++;
+  if (Parser.fmt(t.end) !== Parser.fmt(t2.end)) fieldDiff++;
+});
+check(fieldDiff === 0, 'serializeGantt → parse 字段完全一致（' + model.all.length + ' 任务，无丢失/类型/日期漂移）');
+
+const tmpPath = path.join(ROOT, 'test', '_events_tmp.js');
+fs.writeFileSync(tmpPath, Admin.serializeEvents(Events), 'utf8');
+const Events2 = require(tmpPath);
+fs.unlinkSync(tmpPath);
+const k1 = Object.keys(Events).filter(k => k !== '_roles').sort();
+const k2 = Object.keys(Events2).filter(k => k !== '_roles').sort();
+let evDiff = 0;
+if (JSON.stringify(k1) !== JSON.stringify(k2)) evDiff++;
+k1.forEach(id => {
+  ['short', 'who', 'when', 'where', 'files', 'tips'].forEach(f => { if (Events[id][f] !== Events2[id][f]) evDiff++; });
+  if (JSON.stringify(Events[id].steps) !== JSON.stringify(Events2[id].steps)) evDiff++;
+  if (Events[id].owners.map(o => o.name).join(',') !== Events2[id].owners.map(o => o.name).join(',')) evDiff++;
+});
+const r1 = Object.keys(Events._roles).sort().join(',');
+const r2 = Object.keys(Events2._roles).sort().join(',');
+if (r1 !== r2) evDiff++;
+check(evDiff === 0, 'serializeEvents → require 数据完全一致（含 owners / _roles，' + k1.length + ' 条）');
+check(typeof Events2.b1.owners[0].role === 'string' && Events2.b1.owners[0].role.length > 0, '序列化后再 require，owners.role 由 owners() 自动补全');
+
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

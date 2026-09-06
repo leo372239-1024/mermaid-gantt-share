@@ -125,6 +125,29 @@
 .gv-close{position:sticky;top:0;float:right;border:none;background:#f1f5f9;width:32px;height:32px;border-radius:50%;
   cursor:pointer;font-size:15px;color:#475569;transition:background .2s,transform .2s}
 .gv-close:hover{background:#e2e8f0;transform:rotate(90deg)}
+/* ---- 管理员 CRUD 表单 ---- */
+.gv-adminbar{display:flex;gap:8px;margin:10px 0 2px;flex-wrap:wrap}
+.gv-adminbar .gv-tbtn{font-size:12.5px;padding:6px 14px}
+.gv-form{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.gv-form .f-row{display:flex;gap:10px;flex-wrap:wrap}
+.gv-form .f-col{flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:4px}
+.gv-form label{font-size:11.5px;color:#64748b;font-weight:600;display:flex;flex-direction:column;gap:4px}
+.gv-form input[type=text],.gv-form input[type=date],.gv-form select,.gv-form textarea{
+  appearance:none;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:8px 11px;font-size:13.5px;
+  color:#1e293b;font-family:inherit;transition:border-color .2s,box-shadow .2s;width:100%}
+.gv-form input:focus,.gv-form select:focus,.gv-form textarea:focus{outline:none;border-color:#818cf8;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.gv-form textarea{min-height:88px;resize:vertical;line-height:1.6}
+.gv-form .f-check{flex-direction:row;align-items:center;gap:8px;font-size:13px;color:#334155;font-weight:600}
+.gv-form .f-check input{width:16px;height:16px;accent-color:#4f46e5}
+.gv-form .f-hint{font-size:11px;color:#94a3b8;font-weight:400}
+.gv-evfields{border:1px solid #eef2ff;background:#fafbff;border-radius:12px;padding:12px}
+.gv-evfields .ev-title{font-size:12px;font-weight:700;color:#4338ca;margin-bottom:10px}
+.gv-form .f-actions{display:flex;gap:8px;margin-top:4px}
+.gv-form .f-actions .gv-tbtn{font-size:13.5px;padding:9px 18px}
+.gv-busy{opacity:.6;pointer-events:none}
+.gv-form .f-err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:9px;padding:9px 12px;font-size:12.5px;line-height:1.6;white-space:pre-wrap}
+.gv-confirm{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:12px;padding:14px 16px;font-size:13px;line-height:1.7;margin-top:10px}
+.gv-confirm b{color:#7c2d12}
 /* ---- 手机横屏（landscape）：整页由 index.html 向右旋转 90°（header/甘特图/footer 整体旋转）。
        此处只做布局微调：左列高度收紧；.gv-scroll 保留原生横向滚动（时间轴），但不再拦截触摸事件，
        与页面共享手势——纵向拖拽自然冒泡到 body 翻页，横向拖拽滚时间轴（浏览器自动分工） ---- */
@@ -257,6 +280,10 @@
     if (!container) return null;
     eventsData = eventsData || {};
 
+    /* 管理员 CRUD（GitHub API 线上直写）：GanttAdmin 由 index.html 先引入 */
+    var Admin = (G.GanttAdmin && G.GanttAdmin.isLoggedIn) ? G.GanttAdmin : null;
+    var isAdmin = !!(Admin && Admin.isLoggedIn());
+
     /* 整页向右旋转 90° 回调（index.html 挂载，applyMode/reportLand 共用同一变量） */
     var onLand = null;
 
@@ -299,6 +326,7 @@
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
+      (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点/班务" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' : '') +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
       '<div class="gv-body" id="gv-body">' +
@@ -756,6 +784,9 @@
       switch (act) {
         case 'zoomin':  newDays = viewDays / 1.7; target = c; break;
         case 'zoomout': newDays = viewDays * 1.7; target = c; break;
+        case 'add':
+          openAddForm();
+          return;
         case 'today':
           target = hasTodayInRange ? new Date(today) : (today > maxDate ? new Date(maxDate) : new Date(minDate));
           newDays = Math.min(viewDays, 110);
@@ -920,8 +951,18 @@
       drawer.innerHTML =
         '<div class="grab"></div><button class="gv-close" aria-label="关闭">✕</button>' +
         '<div class="gv-dhead">' + esc(ev ? ev.short : task.name) + '</div>' +
-        '<div class="gv-dsub">' + chips + '<br>' + timeRange + '</div>' + body;
+        '<div class="gv-dsub">' + chips + '<br>' + timeRange + '</div>' + body +
+        (isAdmin
+          ? '<div class="gv-adminbar">' +
+            '<button class="gv-tbtn gv-editbtn" type="button">✏️ 编辑</button>' +
+            '<button class="gv-tbtn gv-delbtn" type="button" style="color:#b91c1c;border-color:#fecaca">🗑 删除</button>' +
+            '</div>'
+          : '');
       drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
+      if (isAdmin) {
+        drawer.querySelector('.gv-editbtn').addEventListener('click', function () { openEditForm(task); });
+        drawer.querySelector('.gv-delbtn').addEventListener('click', function () { confirmDelete(task); });
+      }
       mask.classList.add('on');
       drawer.classList.add('on');
       document.body.style.overflow = 'hidden';
@@ -931,6 +972,230 @@
       mask.classList.remove('on');
       drawer.classList.remove('on');
       document.body.style.overflow = '';
+    }
+
+    /* ================= 管理员 CRUD（GitHub API 线上直写） ================= */
+    /* 生成同类 id 的下一个编号：普通/crit → t*，里程碑 → m*，班务 → b* */
+    function genId(prefix) {
+      var max = 0;
+      var re = new RegExp('^' + prefix + '(\\d+)$');
+      model.all.forEach(function (t) {
+        var m = re.exec(t.id || '');
+        if (m) max = Math.max(max, parseInt(m[1], 10));
+      });
+      return prefix + (max + 1);
+    }
+    function sectionOptions(cur) {
+      return model.sections.map(function (sec) {
+        return '<option value="' + esc(sec.name) + '"' + (sec.name === cur ? ' selected' : '') + '>' + esc(sec.name) + '</option>';
+      }).join('');
+    }
+    /* 写回 gantt.md：读取全文 → 替换 mermaid 块 → PUT（带 sha 防并发覆盖） */
+    function saveGanttBlock(newModel, message) {
+      return Admin.getFile('gantt.md').then(function (f) {
+        var block = Admin.serializeGantt(newModel);
+        var updated = f.content.replace(/```mermaid\s*\n[\s\S]*?\n```/, '```mermaid\n' + block + '\n```');
+        return Admin.putFile('gantt.md', updated, f.sha, message);
+      });
+    }
+    function saveEventsBlock(newEvents, message) {
+      var content = Admin.serializeEvents(newEvents);
+      return Admin.getFile('js/events.js').then(function (f) {
+        return Admin.putFile('js/events.js', content, f.sha, message);
+      });
+    }
+    /* 基于当前 eventsData 构造新对象：changeEvent=null 删除，否则新增/覆盖 */
+    function buildEvents(changeId, changeEvent) {
+      var out = {};
+      Object.keys(eventsData).forEach(function (k) { out[k] = eventsData[k]; });
+      if (changeEvent === null) delete out[changeId];
+      else out[changeId] = changeEvent;
+      return out;
+    }
+    function reloadAfterSave() {
+      location.href = location.pathname + '?v=' + Date.now();
+    }
+    function showFormErr(form, msg) {
+      var old = form.querySelector('.f-err');
+      if (old) old.remove();
+      var d = el('div', 'f-err', '⚠️ ' + esc(msg));
+      form.insertBefore(d, form.querySelector('.f-actions'));
+    }
+
+    /* 渲染编辑/新增表单到抽屉 */
+    function renderForm(opts) {
+      var task = opts.task || null;
+      var ev = opts.ev || null;
+      var isNew = !!opts.isNew;
+      var kind = task ? (task.milestone ? 'milestone' : (task.crit ? 'crit' : 'normal')) : 'normal';
+      var status = task ? (task.done ? 'done' : (task.active ? 'active' : 'none')) : 'none';
+      var secName = task ? ((secOfTask[task.id] && secOfTask[task.id].name) || '') : model.sections[0].name;
+      var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
+      var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
+
+      drawer.innerHTML =
+        '<div class="grab"></div><button class="gv-close" aria-label="关闭">✕</button>' +
+        '<div class="gv-dhead">' + (isNew ? '＋ 新增事件' : '✏️ 编辑「' + esc(task.name) + '」') + '</div>' +
+        '<form class="gv-form" id="gv-crudform">' +
+        '  <div class="f-row">' +
+        '    <div class="f-col" style="flex:2 1 260px"><label>名称<input type="text" name="name" required value="' + esc(task ? task.name : '') + '"></label></div>' +
+        '    <div class="f-col"><label>阶段<select name="section">' + sectionOptions(secName) + '</select></label></div>' +
+        '  </div>' +
+        '  <div class="f-row">' +
+        '    <div class="f-col"><label>类型<select name="kind">' +
+        '      <option value="normal"' + (kind === 'normal' ? ' selected' : '') + '>普通事件（时间范围）</option>' +
+        '      <option value="milestone"' + (kind === 'milestone' ? ' selected' : '') + '>时间点 / 里程碑（◆）</option>' +
+        '      <option value="crit"' + (kind === 'crit' ? ' selected' : '') + '>关键节点（红圈）</option>' +
+        '    </select></label></div>' +
+        '    <div class="f-col"><label>状态<select name="status">' +
+        '      <option value="none"' + (status === 'none' ? ' selected' : '') + '>未开始</option>' +
+        '      <option value="active"' + (status === 'active' ? ' selected' : '') + '>进行中</option>' +
+        '      <option value="done"' + (status === 'done' ? ' selected' : '') + '>已完成</option>' +
+        '    </select></label></div>' +
+        '  </div>' +
+        '  <div class="f-row">' +
+        '    <div class="f-col"><label>开始日期<input type="date" name="start" required value="' + startStr + '"></label></div>' +
+        '    <div class="f-col"><label>结束日期 <span class="f-hint">（留空=单日；里程碑忽略）</span><input type="date" name="end" value="' + endStr + '"></label></div>' +
+        '  </div>' +
+        '  <label class="f-check"><input type="checkbox" name="isEvent"' + (ev ? ' checked' : '') + '> 这是班级事务（含面向同学的执行说明）</label>' +
+        '  <div class="gv-evfields" id="gv-evfields">' +
+        '    <div class="ev-title">📌 班务详情</div>' +
+        '    <div class="f-row">' +
+        '      <div class="f-col"><label>卡片标题<input type="text" name="short" value="' + esc(ev ? ev.short : '') + '"></label></div>' +
+        '      <div class="f-col"><label>面向对象<input type="text" name="who" value="' + esc(ev ? ev.who : '') + '"></label></div>' +
+        '    </div>' +
+        '    <div class="f-row">' +
+        '      <div class="f-col"><label>关键时间<input type="text" name="when" value="' + esc(ev ? ev.when : '') + '"></label></div>' +
+        '      <div class="f-col"><label>地点<input type="text" name="where" value="' + esc(ev ? ev.where : '') + '"></label></div>' +
+        '    </div>' +
+        '    <div class="f-col"><label>文件/材料<input type="text" name="files" value="' + esc(ev ? ev.files : '') + '"></label></div>' +
+        '    <div class="f-col"><label>执行步骤 <span class="f-hint">（每行一步）</span><textarea name="steps">' + esc(ev && ev.steps ? ev.steps.join('\n') : '') + '</textarea></label></div>' +
+        '    <div class="f-col"><label>提醒<input type="text" name="tips" value="' + esc(ev ? ev.tips : '') + '"></label></div>' +
+        '    <div class="f-col"><label>负责班委 <span class="f-hint">（逗号分隔人名）</span><input type="text" name="owners" value="' + esc(ev && ev.owners ? ev.owners.map(function (o) { return o.name; }).join('，') : '') + '"></label></div>' +
+        '  </div>' +
+        '  <div class="f-actions">' +
+        '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">💾 保存</button>' +
+        '    <button type="button" class="gv-tbtn gv-crudcancel">取消</button>' +
+        '  </div>' +
+        '</form>';
+
+      drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
+      drawer.querySelector('.gv-crudcancel').addEventListener('click', closeDetail);
+      drawer.querySelector('#gv-crudform').addEventListener('submit', function (e) {
+        e.preventDefault();
+        handleSubmit(opts, this);
+      });
+      var evFields = drawer.querySelector('#gv-evfields');
+      var isEventCb = drawer.querySelector('[name=isEvent]');
+      function syncEv() { evFields.style.display = isEventCb.checked ? 'block' : 'none'; }
+      isEventCb.addEventListener('change', syncEv);
+      syncEv();
+
+      mask.classList.add('on');
+      drawer.classList.add('on');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function openAddForm() { renderForm({ isNew: true, task: null, ev: null }); }
+    function openEditForm(task) { renderForm({ isNew: false, task: task, ev: eventsData[task.id] || null }); }
+
+    function handleSubmit(opts, form) {
+      var fd = new FormData(form);
+      var name = String(fd.get('name') || '').trim();
+      var sectionName = String(fd.get('section') || '');
+      var kind = String(fd.get('kind') || 'normal');
+      var status = String(fd.get('status') || 'none');
+      var startStr = String(fd.get('start') || '');
+      var endStr = String(fd.get('end') || '');
+      var isEvent = !!fd.get('isEvent');
+      if (!name) { showFormErr(form, '名称不能为空'); return; }
+      var start = Admin.parseDate(startStr);
+      if (!start) { showFormErr(form, '开始日期无效，请选择有效日期'); return; }
+      var end = Admin.parseDate(endStr);
+      if (kind === 'milestone') end = start;
+      if (!end) end = start;
+
+      var milestone = (kind === 'milestone');
+      var crit = (kind === 'crit');
+      var done = (status === 'done');
+      var active = (status === 'active');
+      var task = opts.task || null;
+      var ev = opts.ev || null;
+      var isNew = !!opts.isNew;
+
+      var id = task ? task.id : (isEvent ? genId('b') : (milestone ? genId('m') : genId('t')));
+      var newTask = { name: name, id: id, start: start, end: end, milestone: milestone, crit: crit, done: done, active: active };
+
+      var newModel = {
+        title: model.title,
+        sections: model.sections.map(function (sec) {
+          var tasks = sec.tasks.filter(function (t) { return t.id !== (task ? task.id : null); });
+          if (sec.name === sectionName) tasks = tasks.concat([newTask]);
+          return { name: sec.name, tasks: tasks };
+        })
+      };
+
+      var newEvent = null;
+      if (isEvent) {
+        newEvent = {
+          short: String(fd.get('short') || '').trim() || name,
+          who: String(fd.get('who') || '').trim(),
+          when: String(fd.get('when') || '').trim(),
+          where: String(fd.get('where') || '').trim(),
+          files: String(fd.get('files') || '').trim(),
+          steps: String(fd.get('steps') || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
+          tips: String(fd.get('tips') || '').trim(),
+          owners: String(fd.get('owners') || '').split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (n) { return { name: n }; })
+        };
+      }
+
+      var needEvents = false, newEvents = null;
+      if (isEvent) { needEvents = true; newEvents = buildEvents(id, newEvent); }
+      else if (!isNew && ev) { needEvents = true; newEvents = buildEvents(task.id, null); }
+
+      var msg = (isNew ? 'add' : 'update') + ': ' + id + ' ' + name;
+      var saveBtn = form.querySelector('#gv-crudsave');
+      saveBtn.disabled = true; saveBtn.textContent = '保存中…';
+
+      var ops = [saveGanttBlock(newModel, msg)];
+      if (needEvents) ops.push(saveEventsBlock(newEvents, msg));
+      Promise.all(ops).then(function () { reloadAfterSave(); })
+        .catch(function (err) {
+          saveBtn.disabled = false; saveBtn.textContent = '💾 保存';
+          showFormErr(form, String(err && err.message ? err.message : err));
+        });
+    }
+
+    function confirmDelete(task) {
+      var ev = eventsData[task.id] || null;
+      drawer.innerHTML =
+        '<div class="grab"></div><button class="gv-close">✕</button>' +
+        '<div class="gv-dhead">🗑 删除确认</div>' +
+        '<div class="gv-confirm">确定删除 <b>「' + esc(task.name) + '」</b> 吗？<br>' +
+        (ev ? '该条目是班级事务，将<b>同时删除其班务执行说明</b>。' : '') +
+        '此操作会通过 GitHub API 直接写回仓库并<b>立即对全班生效</b>，难以撤销。</div>' +
+        '<div class="f-actions"><button class="gv-tbtn gv-delconfirm" style="background:#dc2626;color:#fff;border-color:#dc2626">确认删除</button><button class="gv-tbtn gv-crudcancel">取消</button></div>';
+      drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
+      drawer.querySelector('.gv-crudcancel').addEventListener('click', closeDetail);
+      drawer.querySelector('.gv-delconfirm').addEventListener('click', function () { doDelete(task); });
+    }
+    function doDelete(task) {
+      var ev = eventsData[task.id] || null;
+      var newModel = {
+        title: model.title,
+        sections: model.sections.map(function (sec) {
+          return { name: sec.name, tasks: sec.tasks.filter(function (t) { return t.id !== task.id; }) };
+        })
+      };
+      var msg = 'delete: ' + task.id + ' ' + task.name;
+      drawer.innerHTML = '<div class="grab"></div><div class="gv-dhead">删除中…</div><div class="f-hint" style="margin-top:10px">正在通过 GitHub API 写回仓库，请稍候。</div>';
+      var ops = [saveGanttBlock(newModel, msg)];
+      if (ev) ops.push(saveEventsBlock(buildEvents(task.id, null), msg));
+      Promise.all(ops).then(function () { reloadAfterSave(); })
+        .catch(function (err) {
+          drawer.innerHTML = '<div class="grab"></div><button class="gv-close">✕</button><div class="gv-dhead">删除失败</div><div class="f-err">' + esc(String(err && err.message ? err.message : err)) + '</div>';
+          drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
+        });
     }
 
     /* 首次定位：今日（今日超出图范围则定位到数据末端） */

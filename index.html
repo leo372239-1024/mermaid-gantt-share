@@ -95,6 +95,29 @@
   }
   html.page-land .wrap{max-width:none;margin:0;padding:0 12px 28px}
   html.page-land header{position:static}
+  /* ---- 管理员登录面板 ---- */
+  .admin-modal{position:fixed;inset:0;z-index:80;display:none}
+  .admin-modal.on{display:block}
+  .admin-mask{position:absolute;inset:0;background:rgba(15,23,42,.45);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+  .admin-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 40px));
+    background:#fff;border-radius:18px;padding:24px;box-shadow:0 24px 64px -12px rgba(15,23,42,.3)}
+  .admin-card h3{font-size:18px;font-weight:700;color:#0f172a;margin:4px 0 8px}
+  .admin-sub{font-size:12.5px;color:#64748b;line-height:1.7;margin-bottom:16px}
+  .admin-card label{font-size:12px;color:#475569;font-weight:600;display:flex;flex-direction:column;gap:6px}
+  .admin-card input{appearance:none;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:10px 12px;
+    font-size:13.5px;color:#1e293b;font-family:ui-monospace,Consolas,monospace;transition:border-color .2s,box-shadow .2s}
+  .admin-card input:focus{outline:none;border-color:#818cf8;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+  .admin-actions{display:flex;gap:8px;margin-top:16px}
+  .admin-actions button{appearance:none;border:1px solid #e2e8f0;background:#fff;color:#334155;border-radius:9px;padding:9px 16px;
+    font-size:13.5px;cursor:pointer;font-weight:600;transition:transform .2s,box-shadow .2s,background .2s}
+  .admin-actions button:hover{transform:translateY(-1px);background:#f8fafc}
+  .admin-actions button.primary{background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border-color:transparent;
+    box-shadow:0 4px 14px -4px rgba(79,70,229,.45)}
+  .admin-actions button.primary:hover{background:linear-gradient(135deg,#4338ca,#4f46e5)}
+  .admin-err{font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px;margin-top:12px;line-height:1.6;display:none}
+  .admin-ok{font-size:12px;color:#15803d;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px;margin-top:12px;line-height:1.6;display:none}
+  .admin-close{position:absolute;top:12px;right:12px;border:none;background:#f1f5f9;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;color:#475569}
+  .admin-close:hover{background:#e2e8f0}
 </style>
 </head>
 <body>
@@ -103,6 +126,7 @@
   <div class="hdr-top">
     <div class="today" id="todayInfo">加载中…</div>
     <span style="flex:1"></span>
+    <button class="hdr-btn" id="adminBtn" title="管理员登录（登录后可增删改查）">🔒 管理员</button>
     <button class="hdr-btn" id="viewToggle" title="切换显示视图：常规视图 / 向右旋转90° 横屏视图">⇄ 横屏视图</button>
     <button class="hdr-btn" id="hdrToggle" title="折叠/展开顶部说明">▾ 展开</button>
   </div>
@@ -135,8 +159,28 @@
 </footer>
 </div><!-- /page-scroll -->
 
+<!-- 管理员登录面板 -->
+<div class="admin-modal" id="adminModal">
+  <div class="admin-mask" id="adminMask"></div>
+  <div class="admin-card">
+    <button class="admin-close" id="adminClose" aria-label="关闭">✕</button>
+    <h3>🔒 管理员登录</h3>
+    <p class="admin-sub">输入 GitHub 个人访问令牌（PAT），登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与班务，改动将直接写回仓库并对全班生效。<br>令牌仅保存在本机浏览器，不会写入代码或仓库。</p>
+    <label>GitHub 令牌（Personal Access Token）
+      <input type="password" id="adminToken" placeholder="github_pat_... 或 ghp_..." autocomplete="off">
+    </label>
+    <div class="admin-actions">
+      <button class="primary" id="adminSave">验证并登录</button>
+      <button id="adminLogout" style="display:none">退出登录</button>
+    </div>
+    <div class="admin-err" id="adminErr"></div>
+    <div class="admin-ok" id="adminOk"></div>
+  </div>
+</div>
+
 <script src="./js/parser.js"></script>
 <script src="./js/events.js"></script>
+<script src="./js/admin.js"></script>
 <script src="./js/viewer.js"></script>
 <script>
   // 内置示例（仅当无法读取 gantt.md 时兜底，保证 file:// 双击也能看到效果）
@@ -247,6 +291,66 @@
     });
   }
   bindViewToggle();
+
+  // ============ 管理员登录（GitHub API 线上直写） ============
+  (function adminPanel() {
+    const Admin = window.GanttAdmin;
+    if (!Admin) { document.getElementById('adminBtn').style.display = 'none'; return; }
+
+    const btn = document.getElementById('adminBtn');
+    const modal = document.getElementById('adminModal');
+    const mask = document.getElementById('adminMask');
+    const closeBtn = document.getElementById('adminClose');
+    const tokenInput = document.getElementById('adminToken');
+    const saveBtn = document.getElementById('adminSave');
+    const logoutBtn = document.getElementById('adminLogout');
+    const errEl = document.getElementById('adminErr');
+    const okEl = document.getElementById('adminOk');
+
+    function refreshState() {
+      const logged = Admin.isLoggedIn();
+      btn.textContent = logged ? '🔓 已登录' : '🔒 管理员';
+      logoutBtn.style.display = logged ? '' : 'none';
+      if (logged) { tokenInput.value = Admin.getToken(); tokenInput.disabled = true; }
+      else { tokenInput.disabled = false; }
+      errEl.style.display = 'none';
+      okEl.style.display = 'none';
+    }
+
+    function open() {
+      refreshState();
+      modal.classList.add('on');
+      if (!Admin.isLoggedIn()) tokenInput.focus();
+    }
+    function close() { modal.classList.remove('on'); }
+
+    btn.addEventListener('click', open);
+    mask.addEventListener('click', close);
+    closeBtn.addEventListener('click', close);
+
+    saveBtn.addEventListener('click', function () {
+      const token = tokenInput.value.trim();
+      if (!token) { errEl.textContent = '请输入令牌'; errEl.style.display = 'block'; return; }
+      saveBtn.disabled = true; saveBtn.textContent = '验证中…';
+      Admin.validateToken(token).then(function () {
+        Admin.setToken(token);
+        okEl.textContent = '✅ 验证成功，已登录。刷新页面后即可在详情弹窗中增删改查。';
+        okEl.style.display = 'block'; errEl.style.display = 'none';
+        setTimeout(function () { location.href = location.pathname + '?v=' + Date.now(); }, 600);
+      }).catch(function (e) {
+        errEl.textContent = String(e && e.message ? e.message : e);
+        errEl.style.display = 'block';
+        saveBtn.disabled = false; saveBtn.textContent = '验证并登录';
+      });
+    });
+
+    logoutBtn.addEventListener('click', function () {
+      Admin.clearToken();
+      location.href = location.pathname + '?v=' + Date.now();
+    });
+
+    refreshState();
+  })();
 </script>
 </body>
 </html>
