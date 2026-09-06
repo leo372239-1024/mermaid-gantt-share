@@ -57,6 +57,45 @@
       sampleUrl: "",
       owners: owners(["左依晗","张骏齐"])
     },
+    b3: {
+      short: "校外住宿登记承诺书(纸质版）提交",
+      who: "",
+      when: "",
+      where: "",
+      files: "",
+      steps: [],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      sampleUrl: "",
+      owners: owners(["肖康乐"])
+    },
+    b4: {
+      short: "“北京交通大学研究生学生登记表”(电子版+纸质)提交",
+      who: "全体新生",
+      when: "",
+      where: "",
+      files: "",
+      steps: [],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      sampleUrl: "",
+      owners: owners(["覃丽嘉"])
+    },
+    b5: {
+      short: "提交《放弃困难认定声明书》（纸质版）",
+      who: "",
+      when: "",
+      where: "",
+      files: "",
+      steps: [],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      sampleUrl: "",
+      owners: owners(["周英"])
+    },
     _roles: ROLES
   };
 });
