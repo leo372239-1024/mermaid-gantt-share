@@ -153,6 +153,9 @@
   background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:5px 9px;cursor:pointer}
 .gv-form .f-owner input{width:15px;height:15px;accent-color:#4f46e5;margin:0}
 .gv-form .f-owner:has(input:checked){background:#eef2ff;border-color:#c7d2fe;color:#4338ca}
+.gv-form .f-radio{display:flex;gap:14px;margin-top:2px}
+.gv-form .f-radio label{flex-direction:row;align-items:center;gap:5px;font-size:13px;font-weight:500;color:#334155;cursor:pointer}
+.gv-form .f-radio input{width:15px;height:15px;accent-color:#4f46e5;margin:0}
 .gv-evfields{border:1px solid #eef2ff;background:#fafbff;border-radius:12px;padding:12px}
 .gv-evfields .ev-title{font-size:12px;font-weight:700;color:#4338ca;margin-bottom:10px}
 .gv-form .f-actions{display:flex;gap:8px;margin-top:4px}
@@ -1018,6 +1021,7 @@
           return '<span class="gv-owner">' + esc(o.name) + (o.role ? '（' + esc(o.role) + '）' : '') + '</span>';
         }).join('')
         : '/');
+      body += row('是否已完成', task.done ? '已完成' : '未完成');
 
       drawer.innerHTML =
         '<div class="grab"></div><button class="gv-close" aria-label="关闭">✕</button>' +
@@ -1150,7 +1154,6 @@
       var ev = opts.ev || null;
       var isNew = !!opts.isNew;
       var kind = task ? (task.milestone ? 'milestone' : (task.crit ? 'crit' : 'normal')) : 'normal';
-      var status = task ? (task.done ? 'done' : (task.active ? 'active' : 'none')) : 'none';
       var secName = task ? ((secOfTask[task.id] && secOfTask[task.id].name) || '') : model.sections[0].name;
       var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
       var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
@@ -1180,11 +1183,10 @@
         '      <option value="milestone"' + (kind === 'milestone' ? ' selected' : '') + '>时间点 / 里程碑（◆）</option>' +
         '      <option value="crit"' + (kind === 'crit' ? ' selected' : '') + '>关键节点（紫圈）</option>' +
         '    </select></label></div>' +
-        '    <div class="f-col"><label>状态<select name="status">' +
-        '      <option value="none"' + (status === 'none' ? ' selected' : '') + '>未开始</option>' +
-        '      <option value="active"' + (status === 'active' ? ' selected' : '') + '>进行中</option>' +
-        '      <option value="done"' + (status === 'done' ? ' selected' : '') + '>已完成</option>' +
-        '    </select></label></div>' +
+        '    <div class="f-col"><label>是否已完成<div class="f-radio">' +
+        '      <label><input type="radio" name="completed" value="done"' + (task && task.done ? ' checked' : '') + '> 已完成</label>' +
+        '      <label><input type="radio" name="completed" value="undone"' + (!task || !task.done ? ' checked' : '') + '> 未完成</label>' +
+        '    </div></label></div>' +
         '  </div>' +
         '  <div class="f-row">' +
         '    <div class="f-col"><label>开始日期<input type="date" name="start" required value="' + startStr + '"></label></div>' +
@@ -1234,7 +1236,7 @@
       var name = String(fd.get('name') || '').trim();
       var sectionName = String(fd.get('section') || '');
       var kind = String(fd.get('kind') || 'normal');
-      var status = String(fd.get('status') || 'none');
+      var completed = String(fd.get('completed') || 'undone');
       var startStr = String(fd.get('start') || '');
       var endStr = String(fd.get('end') || '');
       var isEvent = !!fd.get('isEvent');
@@ -1247,8 +1249,8 @@
 
       var milestone = (kind === 'milestone');
       var crit = (kind === 'crit');
-      var done = (status === 'done');
-      var active = (status === 'active');
+      var done = (completed === 'done');
+      var active = false;
       var task = opts.task || null;
       var ev = opts.ev || null;
       var isNew = !!opts.isNew;
