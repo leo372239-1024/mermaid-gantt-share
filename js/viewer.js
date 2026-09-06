@@ -106,6 +106,7 @@
 .gv-err{color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:13px 16px;font-size:12.5px;margin:12px 0 0;white-space:pre-wrap}
 .gv-warn{color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:11px 16px;font-size:12.5px;margin:12px 0 0;white-space:pre-wrap}
 .gv-bar{cursor:pointer}
+.gv-hit{cursor:pointer}
 .gv-flash{animation:gvFlash 1.2s ease-in-out 2}
 @keyframes gvFlash{0%,100%{opacity:1}50%{opacity:.3}}
 /* 详情抽屉 */
@@ -333,7 +334,7 @@
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
-      (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点/班务" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' : '') +
+      (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' : '') +
       '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图" style="margin-left:auto">⛶ 全屏</button>' +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
@@ -374,7 +375,7 @@
       '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#b45309"></i>不同事件/节点错色区分</span>' +
       '<span><i class="dia" style="background:#7c3aed"></i>里程碑/当日</span>' +
       '<span><i style="border:1.5px dashed #dc2626;background:transparent;height:4px;width:16px;border-radius:2px"></i>关键节点(红圈)</span>' +
-      '<span class="hint">🖱 点条/◆/左侧名 → 班务详情 · 桌面 Ctrl+滚轮缩放</span>';
+      '<span class="hint">🖱 点条/◆/标题文字/左侧名 → 详情 · 桌面 Ctrl+滚轮缩放</span>';
 
     /* ---- 左侧事件索引（每任务一项；点击=详情+定位高亮） ---- */
     var secOfTask = {};
@@ -390,8 +391,8 @@
         lboxEl.appendChild(secHead);
         sec.tasks.forEach(function (t) {
           var dot = '';
-          if (eventsData[t.id]) dot = '<span class="dot">📌</span>';
-          else if (t.milestone || t.point) dot = '<span class="dot">◆</span>';
+          if (t.milestone || t.point) dot = '<span class="dot">◆</span>';
+          else dot = '<span class="dot">▪</span>';
           var cell = el('div', 'gv-lname',
             dot +
             '<span class="nm"><b>' + esc(t.name) + '</b>' +
@@ -631,14 +632,14 @@
         /* w<=24 或条内放不下：条尾外置「名称(日期)」必显标题 */
         if (!placedInBar) {
           var capOut = shortCaption(t, 999, 9.5);   /* 无限宽限 → 一定产出（含降级日期） */
-          if (capOut) placeText(x2 + 2, cy, capOut, 9.5, !p ? '#94a3b8' : p[2], true, true);
+          if (capOut) placeText(x2 + 2, cy, capOut, 9.5, !p ? '#94a3b8' : p[2], true, true, t.id);
         }
       });
 
       /* ---- 外置文字放置器：右/左/上/下多档试位，撞条或撞字即跳过；
              force=true 时若全档冲突，在本行 ±2 轨空白高度内扫描空位放置，并拉一条同色折线引回事件/节点；
              高密度时标题也必显且不重叠（不再强制重叠硬画）。 ---- */
-      function placeText(x, y, txt, fs, col, force, leadTo) {
+      function placeText(x, y, txt, fs, col, force, leadTo, refId) {
         var wT = estW(txt, fs);
         var tries = [
           { dx: 5, dy: 0, an: 'start' },
@@ -689,13 +690,14 @@
         }
         if (!placed) return false;
 
-        S += '<text x="' + fx.toFixed(1) + '" y="' + fy.toFixed(1) + '" text-anchor="' + fan + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
+        var hitAttrs = refId ? ' class="gv-hit" data-id="' + esc(refId) + '"' : '';
+        S += '<text' + hitAttrs + ' x="' + fx.toFixed(1) + '" y="' + fy.toFixed(1) + '" text-anchor="' + fan + '" font-size="' + fs + '" font-weight="600" fill="' + col + '">' + esc(txt) + '</text>';
         labelRects.push({ x1: (fan === 'start' ? fx : fx), y1: fy - 7, x2: (fan === 'start' ? fx + wT : fx + wT), y2: fy + 4 });
 
         if (leadTo) {
           var textEdge = (fan === 'start') ? fx : fx + wT;
           var midX = (x + textEdge) / 2;
-          S += '<path d="M' + x.toFixed(1) + ',' + y.toFixed(1) +
+          S += '<path' + hitAttrs + ' d="M' + x.toFixed(1) + ',' + y.toFixed(1) +
             ' L' + midX.toFixed(1) + ',' + y.toFixed(1) +
             ' L' + midX.toFixed(1) + ',' + (fy - 1).toFixed(1) +
             ' L' + textEdge.toFixed(1) + ',' + (fy - 1).toFixed(1) +
@@ -733,16 +735,16 @@
           /* 点旁名称标注：「名称(日期)」完整形态，撞条/撞字自动让位；过宽则降级截断，仍强制显示 */
           var capF = captionOf(t);
           if (estW(capF, 10.5) > 260) capF = shortCaption(t, 240, 10.5);
-          placeText(x1, cy, capF, 10.5, !p ? '#8b98a9' : p[2], true, true);
+          placeText(x1, cy, capF, 10.5, !p ? '#8b98a9' : p[2], true, true, t.id);
           return;
         }
         /* 过窄条（w<=24，已在第一遍放置条尾外置）→ 无需重复 */
       });
       svgEl.innerHTML = S;
 
-      /* 事件委托（点击条/菱形） */
+      /* 事件委托（点击条/菱形/外置标题文字/引线） */
       svgEl.onclick = function (ev) {
-        var g = ev.target && ev.target.closest ? ev.target.closest('.gv-bar') : null;
+        var g = ev.target && ev.target.closest ? ev.target.closest('.gv-bar, .gv-hit') : null;
         if (!g || !g.dataset.id) return;
         var t = model.byId ? model.byId(g.dataset.id) : null;
         if (t) openDetail(t, false);
@@ -964,9 +966,8 @@
       var st = statusOf(task, today);
       var chips =
         '<span class="gv-chip c4">' + esc(sec.name) + '</span>' +
-        (task.milestone || task.point ? '<span class="gv-chip c1">◆ 里程碑/当日</span>' : '') +
+        (task.milestone || task.point ? '<span class="gv-chip c1">◆ 时间点/里程碑</span>' : '<span class="gv-chip c1">▬ 时间段事件</span>') +
         (task.crit ? '<span class="gv-chip c3">关键节点</span>' : '') +
-        (ev ? '<span class="gv-chip c2">📌 班级事务</span>' : '') +
         (String(task.name).indexOf('推测') >= 0 ? '<span class="gv-chip c1">日期为推测</span>' : '') +
         '<span class="gv-chip c4">' + (st === 'finish' ? '✓ 已过' : (st === 'going' ? '● 已到/进行' : '○ 未开始')) + '</span>';
       var timeRange = fmtYMD(task.start) + ' → ' + fmtYMD(task.end) + ((task.point || task.milestone) ? '（当日）' : '');
@@ -993,7 +994,7 @@
         body += row('时间范围', timeRange);
         body += row('说明', (String(task.name).indexOf('推测') >= 0 || String(sec.name).indexOf('推测') >= 0)
           ? '2027-2028 学年校历尚未发布，此节点日期为按往年规律推算，请以学校正式通知为准。'
-          : '非班务执行项。带 📌 的班级事务可点开查看面向同学的执行说明。');
+          : '该事项暂无详细执行说明。');
       }
 
       drawer.innerHTML =
@@ -1023,7 +1024,7 @@
     }
 
     /* ================= 管理员 CRUD（GitHub API 线上直写） ================= */
-    /* 生成同类 id 的下一个编号：普通/crit → t*，里程碑 → m*，班务 → b* */
+    /* 生成同类 id 的下一个编号：普通/crit → t*，里程碑 → m*，含详情 → b* */
     function genId(prefix) {
       var max = 0;
       var re = new RegExp('^' + prefix + '(\\d+)$');
@@ -1105,9 +1106,9 @@
         '    <div class="f-col"><label>开始日期<input type="date" name="start" required value="' + startStr + '"></label></div>' +
         '    <div class="f-col"><label>结束日期 <span class="f-hint">（留空=单日；里程碑忽略）</span><input type="date" name="end" value="' + endStr + '"></label></div>' +
         '  </div>' +
-        '  <label class="f-check"><input type="checkbox" name="isEvent"' + (ev ? ' checked' : '') + '> 这是班级事务（含面向同学的执行说明）</label>' +
+        '  <label class="f-check"><input type="checkbox" name="isEvent"' + (ev ? ' checked' : '') + '> 含面向同学的执行说明（详情）</label>' +
         '  <div class="gv-evfields" id="gv-evfields">' +
-        '    <div class="ev-title">📌 班务详情</div>' +
+        '    <div class="ev-title">事件详情</div>' +
         '    <div class="f-row">' +
         '      <div class="f-col"><label>卡片标题<input type="text" name="short" value="' + esc(ev ? ev.short : '') + '"></label></div>' +
         '      <div class="f-col"><label>面向对象<input type="text" name="who" value="' + esc(ev ? ev.who : '') + '"></label></div>' +
@@ -1220,7 +1221,7 @@
         '<div class="grab"></div><button class="gv-close">✕</button>' +
         '<div class="gv-dhead">🗑 删除确认</div>' +
         '<div class="gv-confirm">确定删除 <b>「' + esc(task.name) + '」</b> 吗？<br>' +
-        (ev ? '该条目是班级事务，将<b>同时删除其班务执行说明</b>。' : '') +
+        (ev ? '该条目含执行说明，将<b>同时删除其执行说明</b>。' : '') +
         '此操作会通过 GitHub API 直接写回仓库并<b>立即对全班生效</b>，难以撤销。</div>' +
         '<div class="f-actions"><button class="gv-tbtn gv-delconfirm" style="background:#dc2626;color:#fff;border-color:#dc2626">确认删除</button><button class="gv-tbtn gv-crudcancel">取消</button></div>';
       drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
