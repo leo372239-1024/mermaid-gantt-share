@@ -469,7 +469,7 @@
     var viewOverride = null;
     function effLand() { return viewOverride === 'land' ? true : (viewOverride === 'normal' ? false : autoLand); }
     var isLand = effLand();
-    var viewDays = isLand ? 90 : (isMobile ? 80 : 110); // 视口覆盖天数
+    var viewDays = isLand ? 53 : (isMobile ? 47 : 65); // 视口覆盖天数（默认档 = 点击一次放大的时间范围，原 110/80/90 → ÷1.7）
     var MIN_VIEW = 10, MAX_VIEW = Math.max(totalDays * 1.02, 400);
 
     function pw() { return Math.max(scrollEl.clientWidth, 200); }
@@ -737,6 +737,17 @@
             if (placed) break;
           }
         }
+        /* 全档扫描仍无空位（高密度极端区，如图最左端里程碑右侧被宽条占满、左侧又越界 LEFT_PAD）：
+           不再放弃——选中锚点右侧（含文字探入左栏）或左边界内（端对齐）作无条件兜底，
+           保证标题与引线始终存在、线与节点永不断开（宁等叠不断线）。 */
+        if (!placed && force) {
+          var byF = y - rowH * 0.26;
+          if (byF - 7 < AXIS_H) byF = AXIS_H + 7;
+          if (byF + 4 > totalH) byF = totalH - 4;
+          if (x + 5 + wT <= worldW - RIGHT_PAD) { fx = x + 5; fy = byF; fan = 'start'; }
+          else { fx = Math.max(LEFT_PAD, x - 5 - wT); fy = byF; fan = 'end'; }
+          placed = true;
+        }
         if (!placed) return false;
 
         var hitAttrs = refId ? ' class="gv-hit" data-id="' + esc(refId) + '"' : '';
@@ -750,7 +761,7 @@
             ' L' + midX.toFixed(1) + ',' + y.toFixed(1) +
             ' L' + midX.toFixed(1) + ',' + (fy - 1).toFixed(1) +
             ' L' + textEdge.toFixed(1) + ',' + (fy - 1).toFixed(1) +
-            '" fill="none" stroke="' + col + '" stroke-width="1.15" opacity=".7"/>';
+            '" fill="none" stroke="' + col + '" stroke-width="2.3" opacity=".7"/>';
         }
         return true;
       }
@@ -943,7 +954,7 @@
         isMobile = nextMobile;
         isLand = nextLand;
         root.classList.toggle('gv-land', isLand);
-        var want = isLand ? 90 : (isMobile ? 80 : 110);
+        var want = isLand ? 53 : (isMobile ? 47 : 65);
         if (Math.abs(viewDays - want) > 5) viewDays = want;
         redraw(centerDate());
         if (isLand) setLabelsCollapsed(true);
