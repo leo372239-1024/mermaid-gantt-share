@@ -41,6 +41,7 @@
       stepImg: "",
       attachments: [],
       tips: "目前未提交名单：",
+      tipsImg: "",
       sampleUrl: "https://raw.githubusercontent.com/leo372239-1024/mermaid-gantt-share/main/samples/b1_20260906_210804.png",
       owners: owners(["王富祥"])
     },
@@ -54,6 +55,7 @@
       stepImg: "",
       attachments: [],
       tips: "",
+      tipsImg: "",
       sampleUrl: "",
       owners: owners(["左依晗","张骏齐"])
     },
@@ -67,6 +69,7 @@
       stepImg: "",
       attachments: [],
       tips: "",
+      tipsImg: "",
       sampleUrl: "",
       owners: owners(["肖康乐"])
     },
@@ -80,6 +83,7 @@
       stepImg: "",
       attachments: [],
       tips: "",
+      tipsImg: "",
       sampleUrl: "",
       owners: owners(["覃丽嘉"])
     },
@@ -93,8 +97,23 @@
       stepImg: "",
       attachments: [],
       tips: "",
+      tipsImg: "",
       sampleUrl: "",
       owners: owners(["周英"])
+    },
+    b6: {
+      short: "交学费",
+      who: "",
+      when: "",
+      where: "",
+      files: "",
+      steps: [],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      tipsImg: "",
+      sampleUrl: "",
+      owners: owners([])
     },
     _roles: ROLES
   };
