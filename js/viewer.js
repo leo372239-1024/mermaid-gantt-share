@@ -114,9 +114,9 @@
 .gv-mask.on{opacity:1;pointer-events:auto}
 .gv-drawer{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
   width:min(640px,calc(100vw - 32px));max-height:86vh;overflow-y:auto;background:#fff;z-index:61;
-  border-radius:18px;padding:16px 20px 20px;opacity:0;
+  border-radius:18px;padding:16px 20px 20px;opacity:0;pointer-events:none;
   transition:opacity .22s,transform .22s cubic-bezier(.2,.8,.25,1);box-shadow:0 24px 64px -16px rgba(15,23,42,.35)}
-.gv-drawer.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.gv-drawer.on{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto}
 .gv-drawer .grab{width:44px;height:4px;border-radius:2px;background:#e2e8f0;margin:0 auto 12px}
 .gv-dhead{font-size:18px;font-weight:700;color:#0f172a;margin:2px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.3}
 .gv-dsub{font-size:12px;color:var(--gv-sub);margin-bottom:12px;line-height:1.8}
@@ -134,6 +134,47 @@
 .gv-close{position:sticky;top:0;float:right;border:none;background:#f1f5f9;width:32px;height:32px;border-radius:50%;
   cursor:pointer;font-size:15px;color:#475569;transition:background .2s,transform .2s}
 .gv-close:hover{background:#e2e8f0;transform:rotate(90deg)}
+/* ---- 提醒消息弹窗（截止不足一天） ---- */
+.gv-rembtn{position:relative}
+.gv-rem-badge{position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;
+  background:#ef4444;color:#fff;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 2px #fff;line-height:1}
+.gv-rem-badge:empty{display:none}
+.gv-rem-mask{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:62;opacity:0;pointer-events:none;transition:opacity .18s;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.gv-rem-mask.on{opacity:1;pointer-events:auto}
+.gv-rem-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);width:min(460px,calc(100vw - 32px));
+  max-height:82vh;display:flex;flex-direction:column;background:#fff;z-index:63;border-radius:18px;padding:16px 18px;
+  opacity:0;pointer-events:none;transition:opacity .22s,transform .22s cubic-bezier(.2,.8,.25,1);
+  box-shadow:0 24px 64px -16px rgba(15,23,42,.35)}
+.gv-rem-panel.on{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto}
+.gv-rem-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.gv-rem-head .icon{width:34px;height:34px;border-radius:10px;background:#fef2f2;color:#dc2626;display:flex;align-items:center;justify-content:center;font-size:18px}
+.gv-rem-head h3{margin:0;font-size:16px;font-weight:700;color:#0f172a}
+.gv-rem-sub{font-size:12px;color:#94a3b8;margin:0 0 10px}
+.gv-rem-clear{margin-left:auto;border:none;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer;padding:4px 6px;border-radius:6px}
+.gv-rem-clear:hover{background:#f1f5f9;color:#475569}
+.gv-rem-list{overflow-y:auto;flex:1 1 auto;min-height:60px;max-height:56vh;padding-right:4px}
+.gv-rem-empty{padding:26px 12px;text-align:center;color:#94a3b8;font-size:13.5px;line-height:1.7}
+.gv-rem-item{display:flex;align-items:flex-start;gap:10px;padding:11px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;
+  border-radius:10px;transition:background .15s}
+.gv-rem-item:hover{background:#f8fafc}
+.gv-rem-item input{width:16px;height:16px;margin-top:2px;accent-color:#22c55e;flex:0 0 auto;cursor:pointer}
+.gv-rem-item .nm{font-size:13.5px;color:#1e293b;line-height:1.4}
+.gv-rem-item .mt{font-size:12px;color:#b45309;margin-top:3px;display:flex;gap:6px;align-items:center}
+.gv-rem-item .mt .chip{font-size:10.5px;font-weight:600;background:#fef3c7;color:#92400e;border-radius:999px;padding:1px 7px}
+.gv-rem-item .mt .sec{color:#94a3b8;font-weight:400}
+.gv-rem-item input:checked ~ .nm{text-decoration:line-through;color:#94a3b8}
+.gv-rem-item.done .nm{text-decoration:line-through;color:#94a3b8}
+.gv-rem-item.done .mt{opacity:.55}
+/* 勾选已完成的移到折叠区 */
+.gv-rem-done{margin-top:8px;border-top:1px dashed #e2e8f0;padding-top:6px}
+.gv-rem-done .gv-rem-item{background:#fafbfc}
+.gv-rem-done .gv-rem-item .nm{text-decoration:line-through;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+.gv-rem-done .gv-rem-item .mt{opacity:.55}
+.gv-rem-done .gv-rem-item .chip{background:#f1f5f9;color:#94a3b8}
+.gv-rem-foot{padding:10px 4px 0;font-size:11.5px;color:#94a3b8;text-align:center;border-top:1px solid #f1f5f9;margin-top:8px}
+.gv-rem-close{position:absolute;top:12px;right:12px;border:none;background:#f1f5f9;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;color:#475569}
+.gv-rem-close:hover{background:#e2e8f0}
 /* ---- 管理员 CRUD 表单 ---- */
 .gv-adminbar{display:flex;gap:8px;margin:10px 0 2px;flex-wrap:wrap}
 .gv-adminbar .gv-tbtn{font-size:12.5px;padding:6px 14px}
@@ -375,7 +416,8 @@
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
       '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
-      '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图" style="margin-left:auto">⛶ 全屏</button>' +
+      '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看ddl(截止不足一天)提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +
+      '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图">⛶ 全屏</button>' +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
       '<div class="gv-body" id="gv-body">' +
@@ -900,6 +942,9 @@
         case 'fullscreen':
           toggleFullscreen();
           return;
+        case 'remind':
+          openRemind();
+          return;
         case 'today':
           target = hasTodayInRange ? new Date(today) : (today > maxDate ? new Date(maxDate) : new Date(minDate));
           newDays = Math.min(viewDays, 110);
@@ -1152,6 +1197,157 @@
       mask.classList.remove('on');
       drawer.classList.remove('on');
       document.body.style.overflow = '';
+    }
+
+    /* ================= 提醒消息弹窗：截止不足一天的待办 ================= */
+    var REM_KEY = 'mermaid-gantt.remDone.v1';
+    function loadRemDone() {
+      try { var a = JSON.parse(localStorage.getItem(REM_KEY)); return Array.isArray(a) ? a : []; }
+      catch (e) { return []; }
+    }
+    function saveRemDone(a) {
+      try { localStorage.setItem(REM_KEY, JSON.stringify(a)); } catch (e) {}
+    }
+    /* 任务「真实截止时间」= end/start 当天 23:59:59.999 */
+    function remDeadlineOf(task) {
+      var end = task.end || task.start;
+      if (!end) return null;
+      return dateOnly(end).getTime() + DAY - 1;
+    }
+    function remLeftMs(task, now) {
+      var dl = remDeadlineOf(task);
+      if (dl == null) return null;
+      return dl - now.getTime();
+    }
+    /* 收集：未完成、尚未过期、剩余未超24h 的待办，按最先截止排序 */
+    function remCollect(now) {
+      var out = [];
+      for (var i = 0; i < model.all.length; i++) {
+        var t = model.all[i];
+        if (t.done) continue;
+        var leftMs = remLeftMs(t, now);
+        if (leftMs == null || leftMs < 0 || leftMs > DAY) continue;
+        out.push(t);
+      }
+      out.sort(function (a, b) { return remLeftMs(a, now) - remLeftMs(b, now); });
+      return out;
+    }
+    /* 弹窗容器惰性创建 */
+    var remMask = null, remPanel = null, remListEl = null, remDoneEl = null, remSubEl = null, remFootEl = null;
+    function remEnsure() {
+      if (!remMask || !remPanel) {
+        remMask = el('div', 'gv-rem-mask');
+        remPanel = el('div', 'gv-rem-panel');
+        remPanel.innerHTML =
+          '<button class="gv-rem-close" aria-label="关闭">✕</button>' +
+          '<div class="gv-rem-head">' +
+          '  <span class="icon">🔔</span><h3>ddl 提醒</h3>' +
+          '  <button class="gv-rem-clear" type="button">清除已完成</button>' +
+          '</div>' +
+          '<p class="gv-rem-sub" id="gv-rem-sub"></p>' +
+          '<div class="gv-rem-list" id="gv-rem-list"></div>' +
+          '<div class="gv-rem-done" id="gv-rem-done"></div>' +
+          '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部</div>';
+        root.appendChild(remMask);
+        root.appendChild(remPanel);
+        remMask.addEventListener('click', remClose);
+        remPanel.querySelector('.gv-rem-close').addEventListener('click', remClose);
+        remPanel.querySelector('.gv-rem-clear').addEventListener('click', remClearAll);
+      }
+      remSubEl = remPanel.querySelector('#gv-rem-sub');
+      remListEl = remPanel.querySelector('#gv-rem-list');
+      remDoneEl = remPanel.querySelector('#gv-rem-done');
+      remFootEl = remPanel.querySelector('.gv-rem-foot');
+    }
+    /* 截止文案：剩余<=0=已到期；<12h=今日截止；否则=24h内 */
+    function remChip(t, now) {
+      var left = remLeftMs(t, now);
+      if (left == null) return '';
+      if (left <= 0) return '已到期';
+      if (left < DAY / 2) return '今日截止';
+      return '24h 内截止';
+    }
+    function remItemHTML(list) {
+      var html = '';
+      for (var i = 0; i < list.length; i++) {
+        var t = list[i];
+        var sec = secOfTask[t.id] || { name: '' };
+        var when = (t.end || t.start) ? fmtYMD(t.end || t.start) : '';
+        html += '<label class="gv-rem-item" data-id="' + escId(t.id) + '">' +
+          '<input type="checkbox" data-id="' + escId(t.id) + '">' +
+          '<span style="flex:1">' +
+          '  <span class="nm">' + esc(t.name) + '</span>' +
+          '  <span class="mt"><span class="chip">' + esc(remChip(t, new Date())) + ' · ' + esc(when) + '</span><span class="sec">' + esc(sec.name) + '</span></span>' +
+          '</span>' +
+          '</label>';
+      }
+      return html;
+    }
+    function escId(s) { return String(s).replace(/["\\]/g, ''); }
+    function remBindItems(container) {
+      if (!container) return;
+      container.querySelectorAll('.gv-rem-item').forEach(function (label) {
+        var id = label.dataset.id;
+        var cb = label.querySelector('input');
+        cb.addEventListener('change', function () {
+          var done = loadRemDone();
+          var i = done.indexOf(id);
+          if (cb.checked) { if (i < 0) done.push(id); }
+          else if (i >= 0) done.splice(i, 1);
+          saveRemDone(done);
+          remRender();
+        });
+        label.addEventListener('click', function (ev) { if (ev.target !== cb) cb.click(); });
+      });
+    }
+    function remRender() {
+      remEnsure();
+      var now = new Date();
+      var list = remCollect(now);
+      var doneIds = loadRemDone();
+      var pending = [], finished = [];
+      list.forEach(function (t) { (doneIds.indexOf(t.id) >= 0 ? finished : pending).push(t); });
+      var dateStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日';
+      remSubEl.textContent = list.length
+        ? dateStr + ' · 有 ' + list.length + ' 项待办剩余不足一天（按最先截止排序）'
+        : dateStr + ' · 当前无截止不足一天的待办';
+      if (!pending.length && !finished.length) {
+        remListEl.innerHTML = '<div class="gv-rem-empty">🎉暂无即将截止的待办<br>继续保持</div>';
+        remDoneEl.innerHTML = '';
+        remFootEl.style.visibility = 'hidden';
+        return;
+      }
+      remListEl.innerHTML = remItemHTML(pending);
+      remDoneEl.innerHTML = finished.length
+        ? '<div class="gv-rem-head" style="margin:2px 0 6px"><h3 style="font-size:13px;color:#94a3b8">已完成（折叠）</h3></div>' + remItemHTML(finished)
+        : '';
+      remFootEl.style.visibility = finished.length ? 'visible' : 'hidden';
+      remBindItems(remListEl);
+      remBindItems(remDoneEl);
+    }
+    function remClose() {
+      if (!remPanel) return;
+      remMask.classList.remove('on');
+      remPanel.classList.remove('on');
+      document.body.style.overflow = '';
+    }
+    function remClearAll() {
+      saveRemDone([]);
+      remRender();
+    }
+    function openRemind() {
+      remEnsure();
+      remRender();
+      remMask.classList.add('on');
+      remPanel.classList.add('on');
+      document.body.style.overflow = 'hidden';
+    }
+    /* 角标：待提醒数量 */
+    function remUpdateBadge() {
+      var badge = document.getElementById('gv-rembadge');
+      if (!badge) return;
+      var n = remCollect(new Date()).length;
+      badge.textContent = n > 0 ? String(n) : '';
     }
 
     /* ================= 管理员 CRUD（GitHub API 线上直写） ================= */
@@ -1915,6 +2111,8 @@
     var bootCenter = hasTodayInRange ? new Date(today) : (today > maxDate ? new Date(maxDate) : new Date(minDate));
     redraw(bootCenter);
     syncSaveBtn();
+    /* 提醒角标 & 弹窗可被后续 data 变化刷新 */
+    try { remUpdateBadge(); } catch (e) {}
 
     /* v17：每 3 分钟自动同步——管理员登录态且本地有未提交改动时，静默写回 GitHub（成功不清空页面，免打扰） */
     var AUTO_SYNC_MS = 3 * 60 * 1000;
