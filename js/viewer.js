@@ -1267,14 +1267,14 @@
       if (left < DAY / 2) return '今日截止';
       return '24h 内截止';
     }
-    function remItemHTML(list) {
+    function remItemHTML(list, isDone) {
       var html = '';
       for (var i = 0; i < list.length; i++) {
         var t = list[i];
         var sec = secOfTask[t.id] || { name: '' };
         var when = (t.end || t.start) ? fmtYMD(t.end || t.start) : '';
-        html += '<label class="gv-rem-item" data-id="' + escId(t.id) + '">' +
-          '<input type="checkbox" data-id="' + escId(t.id) + '">' +
+        html += '<label class="gv-rem-item' + (isDone ? ' done' : '') + '" data-id="' + escId(t.id) + '">' +
+          '<input type="checkbox" data-id="' + escId(t.id) + '"' + (isDone ? ' checked' : '') + '>' +
           '<span style="flex:1">' +
           '  <span class="nm">' + esc(t.name) + '</span>' +
           '  <span class="mt"><span class="chip">' + esc(remChip(t, new Date())) + ' · ' + esc(when) + '</span><span class="sec">' + esc(sec.name) + '</span></span>' +
@@ -1317,9 +1317,9 @@
         remFootEl.style.visibility = 'hidden';
         return;
       }
-      remListEl.innerHTML = remItemHTML(pending);
+      remListEl.innerHTML = remItemHTML(pending, false);
       remDoneEl.innerHTML = finished.length
-        ? '<div class="gv-rem-head" style="margin:2px 0 6px"><h3 style="font-size:13px;color:#94a3b8">已完成（折叠）</h3></div>' + remItemHTML(finished)
+        ? '<div class="gv-rem-head" style="margin:2px 0 6px"><h3 style="font-size:13px;color:#94a3b8">已完成（折叠）</h3></div>' + remItemHTML(finished, true)
         : '';
       remFootEl.style.visibility = finished.length ? 'visible' : 'hidden';
       remBindItems(remListEl);
