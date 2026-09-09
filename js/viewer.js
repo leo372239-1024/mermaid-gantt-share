@@ -182,7 +182,7 @@
 .gv-form .f-row{display:flex;gap:10px;flex-wrap:wrap}
 .gv-form .f-col{flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:4px}
 .gv-form label{font-size:11.5px;color:#64748b;font-weight:600;display:flex;flex-direction:column;gap:4px}
-.gv-form input[type=text],.gv-form input[type=date],.gv-form select,.gv-form textarea{
+.gv-form input[type=text],.gv-form input[type=date],.gv-form input[type=time],.gv-form select,.gv-form textarea{
   appearance:none;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:8px 11px;font-size:13.5px;
   color:#1e293b;font-family:inherit;transition:border-color .2s,box-shadow .2s;width:100%}
 .gv-form input:focus,.gv-form select:focus,.gv-form textarea:focus{outline:none;border-color:#818cf8;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
@@ -190,6 +190,8 @@
 .gv-form .f-check{flex-direction:row;align-items:center;gap:8px;font-size:13px;color:#334155;font-weight:600}
 .gv-form .f-check input{width:16px;height:16px;accent-color:#4f46e5}
 .gv-form .f-hint{font-size:11px;color:#94a3b8;font-weight:400}
+.gv-form .f-time{flex-direction:row;align-items:center;gap:6px;font-size:11px;color:#94a3b8;font-weight:500}
+.gv-form .f-time input[type=time]{flex:0 0 118px;padding:6px 8px;font-size:13px}
 .gv-form .f-owners{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
 .gv-form .f-owner{flex-direction:row;align-items:center;gap:5px;font-size:12.5px;font-weight:500;color:#334155;
   background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:5px 9px;cursor:pointer}
@@ -261,6 +263,9 @@
   function diffDays(a, b) { return Math.round((b - a) / DAY); }
   function fmtMD(d) { return (d.getMonth() + 1) + '.' + d.getDate(); }
   function fmtYMD(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  /* 带可选时分的日期输出：time 为 'HH:mm'（空则仅日期） */
+  function fmtDT(d, time) { return time ? fmtYMD(d) + ' ' + time : fmtYMD(d); }
+  function hmOf(time) { return /^(\d{1,2}):(\d{1,2})$/.test(String(time)) ? pad(+time.split(':')[0]) + ':' + pad(+time.split(':')[1]) : ''; }
   function fmtCN(d) { return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日'; }
   function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -356,11 +361,11 @@
     }
     return (out + tail).trim();
   }
-  /* 左列副行：完整 Y-M-D 便于核对年份 */
+  /* 左列副行：完整 Y-M-D([HH:mm]) 便于核对年份/时刻 */
   function ymdRange(t) {
     if (!t.start) return '';
-    if (t.point || t.milestone) return fmtYMD(t.start);
-    return fmtYMD(t.start) + ' → ' + fmtYMD(t.end);
+    if (t.point || t.milestone) return fmtDT(t.start, t.startTime);
+    return fmtDT(t.start, t.startTime) + ' → ' + fmtDT(t.end, t.endTime);
   }
 
   /* ---------- 主挂载 ---------- */
@@ -1085,7 +1090,7 @@
         (task.crit ? '<span class="gv-chip c3">关键节点</span>' : '') +
         (String(task.name).indexOf('推测') >= 0 ? '<span class="gv-chip c1">日期为推测</span>' : '') +
         '<span class="gv-chip c4">' + (st === 'finish' ? '✓ 已过' : (st === 'going' ? '● 已到/进行' : '○ 未开始')) + '</span>';
-      var timeRange = fmtYMD(task.start) + ' → ' + fmtYMD(task.end) + ((task.point || task.milestone) ? '（当日）' : '');
+      var timeRange = fmtDT(task.start, task.startTime) + ' → ' + fmtDT(task.end, task.endTime) + ((task.point || task.milestone) ? '（当日）' : '');
 
       var body = '';
       function row(k, v) { return '<div class="gv-drow"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'; }
@@ -1724,6 +1729,8 @@
       var secName = task ? ((secOfTask[task.id] && secOfTask[task.id].name) || '') : model.sections[0].name;
       var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
       var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
+      var startTStr = task ? hmOf(task.startTime) : '';
+      var endTStr = task ? hmOf(task.endTime) : '';
       /* 责任班委多选（选项来自 ROLES 表：职务 + 姓名） */
       function ownerBoxes(selected) {
         var roles = eventsData._roles || {};
@@ -1756,8 +1763,10 @@
         '    </div></label></div>' +
         '  </div>' +
         '  <div class="f-row">' +
-        '    <div class="f-col"><label>开始日期<input type="date" name="start" required value="' + startStr + '"></label></div>' +
-        '    <div class="f-col"><label>结束日期 <span class="f-hint">（留空=单日；里程碑忽略）</span><input type="date" name="end" value="' + endStr + '"></label></div>' +
+        '    <div class="f-col"><label>开始日期<input type="date" name="start" required value="' + startStr + '"></label>' +
+        '      <label class="f-time">时刻 <span class="f-hint">（可选，24小时制）</span><input type="time" name="startTime" value="' + startTStr + '"></label></div>' +
+        '    <div class="f-col"><label>结束日期 <span class="f-hint">（留空=单日；里程碑忽略）</span><input type="date" name="end" value="' + endStr + '"></label>' +
+        '      <label class="f-time">时刻 <span class="f-hint">（可选，24小时制）</span><input type="time" name="endTime" value="' + endTStr + '"></label></div>' +
         '  </div>' +
         '  <label class="f-check"><input type="checkbox" name="isEvent"' + (ev ? ' checked' : '') + '> 含面向同学的执行说明（详情）</label>' +
         '  <div class="gv-evfields" id="gv-evfields">' +
@@ -1962,13 +1971,32 @@
       var completed = String(fd.get('completed') || 'undone');
       var startStr = String(fd.get('start') || '');
       var endStr = String(fd.get('end') || '');
+      var startTStr = String(fd.get('startTime') || '').trim();
+      var endTStr = String(fd.get('endTime') || '').trim();
       var isEvent = !!fd.get('isEvent');
       if (!name) { showFormErr(form, '名称不能为空'); return; }
       var start = Admin.parseDate(startStr);
       if (!start) { showFormErr(form, '开始日期无效，请选择有效日期'); return; }
+      /* 合并可选时刻（HH:mm，24小时制）到 Date */
+      function applyHM(d, hm) {
+        var mm = /^(\d{1,2}):(\d{1,2})$/.exec(hm);
+        if (!mm) return d;
+        var h = +mm[1], mi = +mm[2];
+        var nd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, mi);
+        if (isNaN(nd.getTime())) return d;
+        return nd;
+      }
+      if (startTStr) start = applyHM(start, startTStr);
       var end = Admin.parseDate(endStr);
       if (kind === 'milestone') end = start;
       if (!end) end = start;
+      if (!(kind === 'milestone') && endTStr) end = applyHM(end, endTStr);
+      /* 归一化为 'HH:MM' 或空串 */
+      var startT = hmOf(startTStr), endT = hmOf(endTStr);
+      /* 同日且两端无时刻 → 结束归一到开始日期，序列化为 0d */
+      if (end && (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth() && start.getDate() === end.getDate())) {
+        if (!startT && !endT) end = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      }
 
       var milestone = (kind === 'milestone');
       var crit = (kind === 'crit');
@@ -1979,7 +2007,7 @@
       var isNew = !!opts.isNew;
 
       var id = task ? task.id : (isEvent ? genId('b') : (milestone ? genId('m') : genId('t')));
-      var newTask = { name: name, id: id, start: start, end: end, milestone: milestone, crit: crit, done: done, active: active };
+      var newTask = { name: name, id: id, start: start, end: end, startTime: startT, endTime: endT, milestone: milestone, crit: crit, done: done, active: active };
 
       var newModel = {
         title: model.title,

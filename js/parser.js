@@ -20,16 +20,34 @@
   var STATUS_WORDS = ['done', 'active', 'crit', 'milestone'];
 
   function toDate(s) {
-    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(s).trim());
+    var d = toDateT(s);
+    return d ? d.d : null;
+  }
+
+  /* 解析日期，支持可选时分（24小时制）：YYYY-M-D 或 YYYY-M-D HH:mm。
+     返回 { d: Date(带时分的时刻), t: 'HH:mm' 字符串或空 }；无法解析返回 null。 */
+  function toDateT(s) {
+    var str = String(s).trim();
+    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?$/.exec(str);
     if (!m) return null;
-    var d = new Date(+m[1], +m[2] - 1, +m[3]);
-    return isNaN(d.getTime()) ? null : d;
+    var h = m[4] != null ? +m[4] : 0;
+    var mi = m[5] != null ? +m[5] : 0;
+    if (h > 23 || mi > 59) return null;
+    var d = new Date(+m[1], +m[2] - 1, +m[3], h, mi);
+    if (isNaN(d.getTime())) return null;
+    var time = m[4] != null ? pad2(h) + ':' + pad2(mi) : '';
+    return { d: d, time: time };
   }
 
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
   function fmt(d) {
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  function fmtDT(d, time) {
+    if (time) return fmt(d) + ' ' + time;
+    return fmt(d);
   }
 
   function addDays(d, n) {
@@ -41,6 +59,19 @@
   function diffDays(a, b) { return Math.round((b - a) / DAY); }
 
   function truncate(s, n) { s = String(s); return s.length > (n || 60) ? s.slice(0, n) + '…' : s; }
+
+  /* 判断冒号后内容是否像「合法任务属性」开头（用于定位 名称:属性 的分隔冒号） */
+  function isAttrStart(head) {
+    if (!head) return false;
+    var tok = head.split(',')[0].trim();
+    if (!tok) return false;
+    if (STATUS_WORDS.indexOf(tok) >= 0) return true;
+    if (/^after\s+[^\s,]+$/i.test(tok)) return true;
+    if (toDateT(tok)) return true;          // 日期(/带时分) token
+    if (/^(\d+)d$/i.test(tok)) return true; // Nd
+    if (/^[\w.#-]+$/.test(tok)) return true; // 裸 id（连续字母数字，含 . # -）
+    return false;
+  }
 
   function parse(text) {
     var warnings = [];
@@ -65,12 +96,18 @@
         continue;
       }
 
-      /* 任务行：用「最后一个冒号」切分，避免任务名里出现 7:00 这类时间冒号导致误切 */
-      var ci = line.lastIndexOf(':');
+      /* 任务行：切分「名称:属性」。不能用 lastIndexOf(':')——因为时间值(如 14:30)也含冒号。
+         改为从左到右找第一个「:右侧是合法属性片段」的冒号作为分隔符：
+         时间 token 内的冒号右侧是残留的分钟数字，不构成合法属性开头，会被自然跳过；
+         而真正的分隔冒号右侧是 id/状态/日期/after/Nd 之一。 */
+      var ci = -1, name = '', attrRaw = '';
+      for (var sc = 0; sc < line.length; sc++) {
+        if (line.charAt(sc) !== ':') continue;
+        var candRaw = line.slice(sc + 1).trim();
+        var candName = line.slice(0, sc).trim();
+        if (candName && isAttrStart(candRaw)) { ci = sc; name = candName; attrRaw = candRaw; break; }
+      }
       if (ci < 0) { warnings.push('第' + (i + 1) + '行 未识别（非任务/指令行）：' + truncate(line)); continue; }
-      var name = line.slice(0, ci).trim();
-      var attrRaw = line.slice(ci + 1).trim();
-      if (!name) { warnings.push('第' + (i + 1) + '行 任务名称为空：' + truncate(line)); continue; }
 
       var tokens = attrRaw.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
       if (!tokens.length) { warnings.push('第' + (i + 1) + '行 任务「' + truncate(name, 24) + '」缺少属性'); continue; }
@@ -79,10 +116,12 @@
 
       var task = {
         name: name, id: '', start: null, end: null,
+        startTime: '', endTime: '',
         point: false, milestone: false, done: false, active: false, crit: false,
         depId: null, depAfter: false, raw: line.trim()
       };
       var dates = [];
+      var dateTimes = [];
       var durDays = null;
       var haveId = false;
 
@@ -97,8 +136,8 @@
         }
         var am = /^after\s+([\w.-]+)$/.exec(t);
         if (am) { task.depId = am[1]; task.depAfter = true; continue; }
-        var d = toDate(t);
-        if (d) { dates.push(d); continue; }
+        var dt = toDateT(t);
+        if (dt && dt.d) { dates.push(dt.d); dateTimes.push(dt.time); continue; }
         var dm = /^(\d+)d$/i.exec(t);
         if (dm) { durDays = parseInt(dm[1], 10); continue; }
         if (!haveId) { task.id = t; haveId = true; continue; }
@@ -108,8 +147,8 @@
       if (durDays === 0) task.point = true; // 0d → 单日节点
       if (task.milestone && !task.end && dates.length === 1 && durDays === null) { task.point = true; }
 
-      if (dates.length) task.start = dates[0];
-      if (dates.length > 1) task.end = dates[1];
+      if (dates.length) { task.start = dates[0]; if (dateTimes[0]) task.startTime = dateTimes[0]; }
+      if (dates.length > 1) { task.end = dates[1]; if (dateTimes[1]) task.endTime = dateTimes[1]; }
 
       if (task.start) {
         if (!task.end) {
@@ -165,5 +204,5 @@
     function durFor(t) { return null; }
   }
 
-  return { parse: parse, toDate: toDate, fmt: fmt, addDays: addDays, diffDays: diffDays };
+  return { parse: parse, toDate: toDate, toDateT: toDateT, fmt: fmt, fmtDT: fmtDT, addDays: addDays, diffDays: diffDays };
 });

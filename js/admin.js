@@ -30,7 +30,15 @@
   var DAY = 86400000;
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
   function fmt(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  /* 带可选时分的日期输出：time 为 'HH:mm' 字符串（空则仅日期） */
+  function fmtDT(d, time) { return time ? fmt(d) + ' ' + time : fmt(d); }
   function diffDays(a, b) { return Math.round((b - a) / DAY); }
+  /* 忽略时分后的整天数差（用于判断是否同一天） */
+  function dateGap(a, b) {
+    var A = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+    var B = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+    return Math.round((B - A) / DAY);
+  }
   function parseDate(s) {
     var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(s).trim());
     if (!m) return null;
@@ -39,7 +47,9 @@
 
   /* ---------- 序列化：模型 → mermaid 块 ---------- */
   /* 单行任务：`名称 :状态, id, 开始, 结束|0d`
-     状态按 milestone/crit/done/active 组合输出；end==start 时写 0d（单日/里程碑点）。 */
+     状态按 milestone/crit/done/active 组合输出。
+     若任务带时分：跨天输出两端 `YYYY-MM-DD HH:mm`；同日则保留两端的时刻（表达当日时间段）；
+     完全无时刻且同日时才写 0d（单日/里程碑点）。 */
   function taskLine(t) {
     var sts = [];
     if (t.milestone) sts.push('milestone');
@@ -47,8 +57,19 @@
     if (t.done) sts.push('done');
     if (t.active) sts.push('active');
     var st = sts.length ? sts.join(',') + ', ' : '';
-    var start = fmt(t.start);
-    var endPart = (t.end && diffDays(t.start, t.end) === 0) ? '0d' : fmt(t.end);
+    var start = fmtDT(t.start, t.startTime);
+    var endPart;
+    if (t.end) {
+      if (dateGap(t.start, t.end) > 0) {
+        endPart = fmtDT(t.end, t.endTime);        // 跨天：两端带时间
+      } else if (t.startTime || t.endTime) {
+        endPart = fmtDT(t.end, t.endTime || t.startTime); // 同日且带时间：保留结束时刻
+      } else {
+        endPart = '0d';                            // 同日无时刻：单日点
+      }
+    } else {
+      endPart = '0d';
+    }
     return t.name + ' :' + st + t.id + ', ' + start + ', ' + endPart;
   }
 
@@ -56,7 +77,11 @@
     var L = [];
     L.push('gantt');
     if (model.title) L.push('    title ' + model.title);
-    L.push('    dateFormat YYYY-MM-DD');
+    /* 只要有任一任务带时分，dateFormat 就用含 HH:mm 的格式，保证标准 mermaid 也能解析 */
+    var hasTime = model.sections.some(function (s) {
+      return s.tasks.some(function (t) { return t.startTime || t.endTime; });
+    });
+    L.push(hasTime ? '    dateFormat YYYY-MM-DD HH:mm' : '    dateFormat YYYY-MM-DD');
     L.push('    axisFormat %Y-%m');
     model.sections.forEach(function (sec) {
       L.push('    section ' + sec.name);
