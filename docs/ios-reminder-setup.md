@@ -47,7 +47,8 @@ gantt.md  ──(GitHub Actions 编译)──┬─▶  deadlines.json  ──(H
 | `startDaysLeft` | 距**开始日**的自然日数（创建闹钟请用这个） | `0` |
 | `startExact` / `dueExact` | 该时刻是显式填写的还是推定值 | `true` / `false` |
 | `alarmAt` / `alarmTime` | 系统闹钟的绝对时刻 / "时:分"（= 开始前 15 分钟） | `2026-09-10T05:45:00.000Z` / `13:45` |
-| `alarmLabel` | 系统闹钟的标签（名称 + 起止日期时间） | `文艺汇演领票 9.10 14:00 → 9.10 17:00` |
+| `alarmLabel` | 系统闹钟的标签（名称｜地点｜开始→结束时间；地点为空则省略） | `文艺汇演领票｜主校区西操场｜9.10 14:00 → 9.10 17:00` |
+| `alarmItems` / `alarmCount` | 顶层「今日可建闹钟」子集 / 其条数（= 今天开始且已填开始时刻） | `[…]` / `3` |
 | `alarmLead` / `alarmExact` | 提前量（分钟）/ 该条能否建闹钟 | `15` / `true` |
 | `alert` / `detail` / `owner` / `where` | 一句话提醒 / 长文案 / 负责班委 / 地点 | — |
 
@@ -152,8 +153,9 @@ gantt.md  ──(GitHub Actions 编译)──┬─▶  deadlines.json  ──(H
 
 > ⚠️ 这里有一个必须知道的坑：**时钟 App 的闹钟只有「时刻 + 重复」，不能绑定具体日期**。
 > 给"明天 09:00 开始"的待办设 08:45 闹钟，它会在**今天** 08:45 就响。
-> 因此真闹钟只对**当天开始**的待办有意义——完整做法（按 `startDaysLeft = 0` 过滤、
-> 闹钟时间取 `alarmAt` = **开始前 15 分钟**、标签取 `alarmLabel` = **名称 + 起止日期时间**、
+> 因此真闹钟只对**当天开始**的待办有意义——完整做法（按 `startDaysLeft = 0` 过滤，
+> 或直接遍历顶层 `alarmItems`；闹钟时间取 `alarmAt` = **开始前 15 分钟**、
+> 标签取 `alarmLabel` = **名称｜地点｜开始→结束时间**、每条只建一个闹钟、
 > 一键从网页唤起、每天自动同步）见
 > [`ios-system-alarm-setup.md`](./ios-system-alarm-setup.md) 的通道 C。
 

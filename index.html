@@ -154,7 +154,7 @@
       ④ <b>视图</b>：右上角 <b>⇄ 横屏视图</b> 切换 常规视图 ↔ 整页向右旋转 90°（整个网页旋转，手机横着看更清晰）；手机横屏时自动切换<br>
       ⑤ <b>定位</b>：点击左侧事件名称 → 自动滚动到该事件日期并高亮闪烁<br>
       ⑥ <b>ddl 提醒</b>：工具栏 <b>🔔 提醒</b> 列出「截止不足一天」的待办，时间精确到分钟；弹窗底部可
-      <b>📅 加入系统日历</b>（.ics，到点由系统日历闹铃响，能穿透静音）、<b>⏰ 同步系统闹钟</b>、<b>📋 复制清单</b>、<b>🔗 订阅地址</b><br>
+      <b>📅 加入系统日历</b>（.ics，到点由系统日历闹铃响，能穿透静音）、<b>⏰ 同步系统闹钟</b>（只对<b>今天开始</b>的条目，各建一个<b>开始前 15 分钟</b>的闹钟，标签 = <b>名称｜地点｜开始→结束时间</b>）、<b>📋 复制清单</b>、<b>🔗 订阅地址</b><br>
       ⑦ <b>保存同步</b>：管理员登录后按 <b>Ctrl + S</b>（Mac 为 ⌘ + S）= 点「💾 保存更改」，把本地改动一次性写回仓库<br>
       红色竖线共 <b>2 条</b>：实线 = <b>当前时刻</b>（每分钟自动移动），虚线 = <b>今日 24:00</b>，随<b>打开当天</b>自动更新
     </div>
@@ -181,11 +181,11 @@
   </div>
 </div>
 
-<script src="./js/parser.js?v=26"></script>
-<script src="./js/events.js?v=26"></script>
-<script src="./js/ics.js?v=26"></script>
-<script src="./js/admin.js?v=26"></script>
-<script src="./js/viewer.js?v=26"></script>
+<script src="./js/parser.js?v=27"></script>
+<script src="./js/events.js?v=27"></script>
+<script src="./js/ics.js?v=27"></script>
+<script src="./js/admin.js?v=27"></script>
+<script src="./js/viewer.js?v=27"></script>
 <script>
   // 内置示例（仅当无法读取 gantt.md 时兜底，保证 file:// 双击也能看到效果）
   const SAMPLE_GANTT = `gantt

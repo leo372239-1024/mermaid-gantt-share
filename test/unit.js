@@ -17,6 +17,7 @@ const ROOT = path.join(__dirname, '..');
 const Parser = require(path.join(ROOT, 'js', 'parser.js'));
 const Events = require(path.join(ROOT, 'js', 'events.js'));
 const Viewer = require(path.join(ROOT, 'js', 'viewer.js'));
+const Admin = require(path.join(ROOT, 'js', 'admin.js'));
 
 let failures = 0;
 function check(cond, msg) {
@@ -95,7 +96,6 @@ check(!!Parser.parse && !!Parser.fmt, 'parser.js 暴露 parse/fmt');
 
 /* ---- 6. 序列化 round-trip（admin.js 写回 GitHub 前的安全阀） ---- */
 console.log('[6] 序列化 round-trip');
-const Admin = require(path.join(ROOT, 'js', 'admin.js'));
 const serGantt = Admin.serializeGantt(model);
 const model2 = Parser.parse(serGantt);
 let fieldDiff = 0;
@@ -171,7 +171,7 @@ check(Viewer.hmOf('9:5') === '09:05' && Viewer.hmOf('') === '', '时刻归一：
 /* ---- 9. 生成物口径一致（deadlines.json ↔ deadlines.ics） ---- */
 console.log('[9] 生成物口径一致');
 const dj = JSON.parse(fs.readFileSync(path.join(ROOT, 'deadlines.json'), 'utf8'));
-check(dj.schema === 3, 'deadlines.json schema = 3（新增通道 C 的 startDaysLeft / alarmAt / alarmTime / alarmLabel / alarmExact 字段）');
+check(dj.schema === 4, 'deadlines.json schema = 4（通道 C 新增 alarmItems / alarmLabelSep，alarmLabel 含地点）');
 const w25 = dj.items.filter(i => i.id === 't25')[0];
 check(!!w25 && w25.time === '17:00', '截止时刻精确到分钟 time=' + (w25 && w25.time));
 check(!!w25 && w25.window === '9.10 14:00 → 9.10 17:00', '起止文案分钟级 window=' + (w25 && w25.window));
@@ -204,44 +204,112 @@ check(Viewer.evDriftKeys(realSrc, stale).join(',') === 'b7', '本地缺 b7 时�
 check(Viewer.evDriftKeys('', Events).length === 0, '远端内容为空时不误报');
 check(Viewer.evDriftKeys(realSrc, null).length === 0, '无本地 events 时不误报');
 
-/* ---- 11. 通道 C 闹钟口径（名称+起止日期时间 / 开始前 15 分钟） ---- */
+/* ---- 11. 通道 C 闹钟口径（名称｜地点｜起止日期时间 / 仅今日 / 开始前 15 分钟） ---- */
 console.log('[11] 通道 C 闹钟口径');
 check(dj.alarmLeadMin === 15 && Viewer.alarmLeadMin === 15,
   '两端提前量常量一致（均为 15 分钟）');
+check(dj.alarmLabelSep === '｜' && Viewer.alarmLabelSep === '｜',
+  '两端标签分隔符一致（均为全角竖线「｜」，避免与任务名里的逗号混淆）');
 check(dj.items.every(i => i.alarmLead === 15), '窗口内每条都带 alarmLead = 15');
 check(dj.items.every(i => 'startDaysLeft' in i && 'alarmAt' in i && 'alarmTime' in i && 'alarmLabel' in i && 'alarmExact' in i),
   '窗口内每条都带齐通道 C 字段（startDaysLeft / alarmAt / alarmTime / alarmLabel / alarmExact）');
 /* 跨端口径断言：网页端纯函数 vs 构建端产出，逐条比对（这是「双端必须同构」的护栏） */
 const aMis = dj.items.filter(i => { const t = model.byId(i.id); return !t || Viewer.alarmHMOf(t) !== i.alarmTime; });
 check(aMis.length === 0, '闹钟时刻两端一致（' + dj.items.length + ' 条逐条比对，不一致：' + aMis.map(i => i.id).join(',') + '）');
+/* 标签 = 名称｜地点｜起止：网页端按「events.short + events.where + alarmWhenOf」重算，必须逐条相等 */
 const lMis = dj.items.filter(i => {
   const t = model.byId(i.id);
   if (!t) return true;
-  const nm = (Events[i.id] && Events[i.id].short) || t.name;
-  return nm + ' ' + Viewer.alarmWhenOf(t) !== i.alarmLabel;
+  const ev = Events[i.id] || {};
+  const nm = ev.short || t.name;
+  const wh = (ev.where || '').trim();
+  const exp = [nm, wh, Viewer.alarmWhenOf(t)].filter(Boolean).join('｜');
+  return exp !== i.alarmLabel;
 });
-check(lMis.length === 0, '闹钟标签两端一致（名称 + 起止日期时间，不一致：' + lMis.map(i => i.id).join(',') + '）');
+check(lMis.length === 0, '闹钟标签两端一致（名称｜地点｜起止，不一致：' + lMis.map(i => i.id).join(',') + '）');
 const c25 = dj.items.filter(i => i.id === 't25')[0];
 check(!!c25 && c25.alarmTime === '13:45', '开始前 15 分钟：t25 14:00 开始 → 闹钟 ' + (c25 && c25.alarmTime));
 check(!!c25 && Date.parse(c25.alarmAt) === Date.parse(c25.startAt) - 15 * 60000,
   'alarmAt = startAt − 15 分钟（绝对时刻，含时区一致）');
-check(!!c25 && c25.alarmLabel === '文艺汇演领票 9.10 14:00 → 9.10 17:00',
-  'alarmLabel =「名称 + 起止日期时间」（实际「' + (c25 && c25.alarmLabel) + '」）');
+check(!!c25 && c25.alarmLabel === '文艺汇演领票｜9.10 14:00 → 9.10 17:00',
+  'alarmLabel =「名称｜起止日期时间」（t25 无地点，实际「' + (c25 && c25.alarmLabel) + '」）');
 const cB7 = dj.items.filter(i => i.id === 'b7')[0];
-check(!!cB7 && cB7.alarmLabel === '交大人节”文艺晚会 9.10 18:45', '起止同刻的标签只显示一次时间（与标题 rangeCN 同口径）');
+check(!!cB7 && cB7.alarmLabel === '交大人节”文艺晚会｜主校区西操场｜9.10 18:45',
+  '标签含地点，且起止同刻只显示一次时间（实际「' + (cB7 && cB7.alarmLabel) + '」）');
+check(dj.items.filter(i => i.where).every(i => i.alarmLabel.indexOf('｜' + i.where + '｜') > 0),
+  '凡有地点的条目，标签中必含「｜地点｜」段（' + dj.items.filter(i => i.where).length + ' 条有地点）');
 const cM12 = dj.items.filter(i => i.id === 'm12')[0];
-check(!!cM12 && cM12.alarmTime === '12:45', '里程碑同理：m12 13:00 → 闹钟 ' + (cM12 && cM12.alarmTime));
-check(dj.items.every(i => i.alarmLabel.indexOf(i.name + ' ') === 0), 'alarmLabel 以「名称 + 空格」开头');
+check(!!cM12 && cM12.alarmTime === '12:45', '时间点同理：m12 13:00 → 闹钟 ' + (cM12 && cM12.alarmTime));
+check(dj.items.every(i => i.alarmLabel.indexOf(i.name + '｜') === 0), 'alarmLabel 以「名称｜」开头');
+/* 通道 C 的输入集合：只含「今天开始 + 显式填了开始时刻」的条目 */
+const alarmIds = dj.alarmItems.map(i => i.id);
+check(Array.isArray(dj.alarmItems) && dj.alarmCount === dj.alarmItems.length,
+  'alarmItems / alarmCount 自洽（' + dj.alarmCount + ' 条）');
+check(dj.alarmItems.every(i => i.startDaysLeft === 0 && i.alarmExact === true),
+  'alarmItems 只含「今天开始且已填开始时刻」的条目（' + alarmIds.join(',') + '）');
+check(JSON.stringify(alarmIds) === JSON.stringify(dj.items.filter(i => i.startDaysLeft === 0 && i.alarmExact).map(i => i.id)),
+  'alarmItems 与 items 的今日子集完全一致（不多不少）');
+check(dj.items.some(i => i.startDaysLeft !== 0) && dj.alarmItems.length < dj.items.length,
+  '窗口内存在非今日/未填时刻的条目（共 ' + (dj.items.length - dj.alarmItems.length) + ' 条），均未进入 alarmItems —— 今天不会误建闹钟');
 /* startDaysLeft 必须按「开始日」算，否则今天开始、跨日结束的活动会被漏掉闹钟 */
 const cB6 = dj.items.filter(i => i.id === 'b6')[0];
 check(!!cB6 && cB6.startDaysLeft < cB6.daysLeft,
   'startDaysLeft 按开始日计算（b6 8.25→9.9：startDaysLeft=' + (cB6 && cB6.startDaysLeft) + ' < daysLeft=' + (cB6 && cB6.daysLeft) + '）');
 check(!!cB6 && cB6.alarmExact === false, '未填开始时刻 → alarmExact=false（该条不应建闹钟）');
+check(!dj.alarmItems.some(i => i.alarmExact === false), '未填开始时刻的条目不会进入 alarmItems（b6/b2 等已被排除）');
 check(dj.items.every(i => i.alarmExact === i.startExact), 'alarmExact 与 startExact 同源');
 /* 跨零点：开始 00:05 → 闹钟落在前一天 23:50，靠 Date 自动跨日而不是手工借位 */
 const midnight = { start: new Date(2026, 8, 11), end: new Date(2026, 8, 11), startTime: '00:05', endTime: '00:05' };
 check(Viewer.alarmHMOf(midnight) === '23:50', '跨零点回退正确：9.11 00:05 开始 → 闹钟 ' + Viewer.alarmHMOf(midnight));
 check(Viewer.alarmAtOf(midnight).getDate() === 10, 'alarmAtOf 自动跨日（不靠手工借位）');
+/* 标签拼装纯函数：空段自动省略，段落顺序固定为「名称｜地点｜起止」 */
+check(Viewer.alarmLabelOf('名称', '地点', '9.10 14:00') === '名称｜地点｜9.10 14:00', 'alarmLabelOf 三段齐全');
+check(Viewer.alarmLabelOf('名称', '', '9.10 14:00') === '名称｜9.10 14:00', 'alarmLabelOf 无地点时省略该段');
+
+/* ---- 12. 编辑表单口径（类型 / 时间点必须无结束时间 / 时刻可清空） ---- */
+console.log('[12] 编辑表单口径');
+/* 「时间点」在提交侧被强制为 end = start、endTime 为空。序列化时必须与历史写法逐字一致，
+   否则每编辑一次 m12/b7 就会改一次 gantt.md（且 dateFormat 也可能被无谓切换）。 */
+const ptLine = Admin.taskLine({
+  name: '文艺汇演', id: 't25', start: new Date(2026, 8, 10, 18, 45), end: new Date(2026, 8, 10, 18, 45),
+  startTime: '18:45', endTime: '', milestone: true, crit: false, done: false, active: false
+});
+check(ptLine === '文艺汇演 :milestone, t25, 2026-09-10 18:45, 2026-09-10 18:45',
+  '时间点：endTime 为空时回落到开始时刻，写法与历史一致（' + ptLine + '）');
+const ptNoTime = Admin.taskLine({
+  name: '元旦', id: 'm7', start: new Date(2027, 0, 1), end: new Date(2027, 0, 1),
+  startTime: '', endTime: '', milestone: true, crit: false, done: false, active: false
+});
+check(ptNoTime === '元旦 :milestone, m7, 2027-01-01, 0d', '时间点：无时刻 → 0d（' + ptNoTime + '）');
+const evLine = Admin.taskLine({
+  name: '文艺汇演领票', id: 't25', start: new Date(2026, 8, 10, 14, 0), end: new Date(2026, 8, 10, 17, 0),
+  startTime: '14:00', endTime: '17:00', milestone: false, crit: false, done: false, active: false
+});
+check(evLine === '文艺汇演领票 :t25, 2026-09-10 14:00, 2026-09-10 17:00', '事件：同日两端带时刻（' + evLine + '）');
+/* 「清除时刻」= 把两个时刻都清空 → 同日两端的时分都不再写入，退化成单日 0d 形态 */
+const cleared = Admin.taskLine({
+  name: '单日事项', id: 't99', start: new Date(2026, 8, 13), end: new Date(2026, 8, 13),
+  startTime: '', endTime: '', milestone: false, crit: false, done: false, active: false
+});
+check(cleared === '单日事项 :t99, 2026-09-13, 0d', '清除时刻后回落到「单日 0d」形态（' + cleared + '）');
+check(!/HH:mm/.test(Admin.serializeGantt({
+  title: 'x', sections: [{ name: 's', tasks: [{
+    name: '单日事项', id: 't99', start: new Date(2026, 8, 13), end: new Date(2026, 8, 13),
+    startTime: '', endTime: '', milestone: false, crit: false, done: false, active: false
+  }] }]
+})), '全部时刻被清空后 dateFormat 回落到不带 HH:mm 的形态');
+/* crit（关键节点紫圈）已不是可选的「类型」，但仍须能被原样保留 */
+const critLine = Admin.taskLine({
+  name: '期末考试周', id: 't8', start: new Date(2027, 0, 4), end: new Date(2027, 0, 15),
+  startTime: '', endTime: '', milestone: false, crit: true, done: false, active: false
+});
+check(critLine === '期末考试周 :crit, t8, 2027-01-04, 2027-01-15', 'crit 标记可被保留（' + critLine + '）');
+/* 类型下拉只剩两项：表单里不应再出现 value="crit" 的选项 */
+const viewerSrc = fs.readFileSync(path.join(ROOT, 'js', 'viewer.js'), 'utf8');
+const kindOptions = (viewerSrc.match(/<option value="(normal|milestone|crit)"[^>]*>([^<]*)</g) || [])
+  .filter(s => /name="kind"|<option value="(normal|milestone|crit)"/.test(s) && /事件|时间点|关键节点/.test(s));
+check(kindOptions.length === 2 && !/value="crit"/.test(viewerSrc.slice(viewerSrc.indexOf('name="kind"'), viewerSrc.indexOf('name="kind"') + 900)),
+  '类型下拉只有「事件 / 时间点」两项（实测 ' + kindOptions.length + ' 项；无 crit 选项）');
 
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

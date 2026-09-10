@@ -40,6 +40,13 @@ const ICS_WINDOW_DAYS = toInt(process.env.ICS_WINDOW_DAYS, 180);
    为什么锚开始而不是截止：闹钟的作用是「把人从当前状态拉起来去做这件事」，
    而这件事在开始时刻就已经需要人在场了（例：领票 14:00 开始，17:00 才算截止）。 */
 const ALARM_LEAD_MIN = toInt(process.env.DEADLINE_ALARM_LEAD_MIN, 15);
+/* 通道 C 闹钟标签的字段分隔符：标签 =「名称｜地点｜开始→结束时间」，空段省略。
+   不用逗号/顿号分段，是因为任务名本身可能含「，」（例：「去天佑会堂经管牌子集合看直播，13.15到」）。
+   网页端 js/viewer.js 的 ALARM_LABEL_SEP / alarmLabelOf 必须与此同构（test/unit.js [11] 断言）。 */
+const ALARM_LABEL_SEP = '｜';
+function alarmLabelOf(name, where, when) {
+  return [name, where, when].filter(Boolean).join(ALARM_LABEL_SEP);
+}
 
 function toInt(v, dflt) {
   const n = parseInt(v, 10);
@@ -186,16 +193,20 @@ function build() {
 
     const ev = Events[t.id];
     const displayName = (ev && ev.short) ? ev.short : t.name;
+    const whereText = (ev && ev.where) ? String(ev.where).trim() : '';
     const hoursLeft = Math.round((dueMs - nowMs) / 3600000);
     const overdue = daysLeft < 0;
     /* 人类可读的分钟级起止：'9.10 14:00 → 9.10 17:00'（未填时刻的推定值带 ~ 标记） */
     const windowText = fmtMd(t.start) + ' ' + (sh.exact ? '' : '~') + timeStart +
       ' → ' + fmtMd(t.end) + ' ' + (eh.exact ? '' : '~') + time;
-    /* 通道 C 的闹钟标签 = 「名称 + 起止日期时间」，例：'文艺汇演领票 9.10 14:00 → 9.10 17:00'
-       （在「时钟」App 里一眼看清是哪件事、什么时候开始什么时候结束）
-       起止同刻（时间点/里程碑）时只显示一次，与标题 rangeCN 的口径保持一致 */
-    const alarmLabel = displayName + ' ' +
-      (startMs === dueMs ? fmtMd(t.start) + ' ' + (sh.exact ? '' : '~') + timeStart : windowText);
+    /* 通道 C 的闹钟标签 = 「名称｜地点｜开始→结束时间」，例：
+       '文艺汇演领票｜主校区西操场｜9.10 14:00 → 9.10 17:00'
+       （在「时钟」App 里一眼看清是哪件事、在哪、什么时候开始什么时候结束；地点为空则省略该段）
+       起止同刻（时间点）时只显示一次时间，与标题 rangeCN 的口径保持一致 */
+    const alarmWhen = (startMs === dueMs)
+      ? fmtMd(t.start) + ' ' + (sh.exact ? '' : '~') + timeStart
+      : windowText;
+    const alarmLabel = alarmLabelOf(displayName, whereText, alarmWhen);
 
     const rec = {
       id: t.id,
@@ -234,7 +245,7 @@ function build() {
       kind: t.milestone ? 'milestone' : (t.point ? 'point' : 'span'),
       crit: !!t.crit,
       owner: ownerBrief(ev),
-      where: (ev && ev.where) ? ev.where : '',
+      where: whereText,
       alert: dueText(daysLeft, time) + ' · ' + displayName,
       detail: dueTextLong(daysLeft, time, y, mo, da)
     };
@@ -253,14 +264,24 @@ function build() {
 
   const within24hItems = items.filter(function (it) { return it.hoursLeft <= 24; });
 
+  /* 通道 C 的输入集合：只含「今天开始 + 显式填了开始时刻」的条目。
+     时钟闹钟没有日期维度，非今天的条目会在今天同一时刻误响，所以必须由构建期先筛掉。
+     快捷指令可以直接重复遍历 alarmItems（省掉「startDaysLeft = 0」那一道判断），
+     但仍须保留「alarmAt 晚于当前日期」这一道 —— 那是运行时刻的判断，构建期无法代劳。
+     注意 alarmItems 里可能含 alarmAt 已过点的条目（构建是 06:00/18:00 的快照），
+     这一点与网页端 remAlarmCandidates 的实现一致：网页端会把已过点的实时剔除。 */
+  const alarmItems = items.filter(function (it) { return it.startDaysLeft === 0 && it.alarmExact; });
+
   const out = {
-    schema: 3,
+    schema: 4,
     generatedAt: new Date(nowMs).toISOString(),
     timezone: 'Asia/Shanghai',
     windowDays: WINDOW_DAYS,
     icsWindowDays: ICS_WINDOW_DAYS,
     /* 通道 C 的提前量（分钟）：闹钟锚在「开始时刻 − 这个值」 */
     alarmLeadMin: ALARM_LEAD_MIN,
+    /* 通道 C 闹钟标签的字段分隔符（名称｜地点｜起止） */
+    alarmLabelSep: ALARM_LABEL_SEP,
     today: now.y + '-' + pad2(now.m) + '-' + pad2(now.d),
     count: items.length,
 
@@ -269,6 +290,10 @@ function build() {
        或 dueAt（绝对时刻，可自行与当前时间求差）来做判断。 */
     within24h: within24hItems.length,
     within24hText: within24hItems.map(function (it) { return it.alert; }).join('\n'),
+
+    /* 通道 C 专用：今天该建闹钟的条目（与 items 同结构，是 items 的子集） */
+    alarmCount: alarmItems.length,
+    alarmItems: alarmItems,
 
     /* 窗口内全部条目的汇总，换行分隔，可直接作为通知正文 */
     summary: items.map(function (it) { return it.alert; }).join('\n'),
@@ -325,7 +350,7 @@ console.log('  基准日期（北京）：' + result.today);
 console.log('  窗口：提醒 ' + WINDOW_DAYS + ' 天 / 日历 ' + ICS_WINDOW_DAYS + ' 天（逾期宽限 ' + OVERDUE_GRACE_DAYS + ' 天）');
 console.log('  条目：' + result.count + ' 条，其中 24 小时内到期 ' + result.within24h + ' 条；日历事件 ' + built.icsCount + ' 条');
 /* 通道 C 体检：只有「今天开始」且「显式填了开始时刻」的条目才可能建成闹钟 */
-const alarmToday = result.items.filter(function (it) { return it.startDaysLeft === 0 && it.alarmExact; });
+const alarmToday = result.alarmItems;
 console.log('  通道 C 可建闹钟：' + alarmToday.length + ' 条（今天开始且有明确开始时刻，锚点 = 开始前 ' + ALARM_LEAD_MIN + ' 分钟）');
 alarmToday.forEach(function (it) {
   console.log('   ⏰ ' + it.alarmTime + '  ' + it.alarmLabel);

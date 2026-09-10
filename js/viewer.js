@@ -17,6 +17,12 @@
  * 11) 事件按序号错色配色（已完成统一灰）；条内/点旁标注「名称(日期)」防重叠；
  *     条内放不下时自动降级并条尾外置（强制显示标题）
  * 12) 视图切换：常规视图 ⇄ 向右旋转90° 横屏视图（右上角按钮手动切换；手机横屏仍自动）
+ * 13) 管理员编辑表单：类型只有「事件 / 时间点」两种（**时间点不设结束时间**，自动禁用+清空）；
+ *     开始/结束的时刻与结束日期都有「清除」按钮（原生控件选完后无法置空）；
+ *     「关键节点紫圈」是历史数据的强调标记，不再是类型，编辑既有 crit 条目时可取消
+ * 14) 通道 C（快捷指令 → 时钟 App 真闹钟）：**只对「今天开始」的条目**、每条只建 1 个闹钟，
+ *     时间 = 开始时刻前 15 分钟，标签 = 「名称｜地点｜开始→结束时间」（口径与
+ *     tools/build-deadlines.js 的 alarmAt/alarmLabel 必须同构）
  *
  * 用法：GanttViewer.mount(containerEl, ganttCode, eventsData)
  */
@@ -211,6 +217,17 @@
 .gv-form .f-hint{font-size:11px;color:#94a3b8;font-weight:400}
 .gv-form .f-time{flex-direction:row;align-items:center;gap:6px;font-size:11px;color:#94a3b8;font-weight:500}
 .gv-form .f-time input[type=time]{flex:0 0 118px;padding:6px 8px;font-size:13px}
+/* v27：日期/时刻的显式「清除」出口。
+   原生 date/time 输入在 iOS 上是滚轮选择器，一旦选定没有任何方式置空（桌面端也只有悬停时
+   才出现一个不显眼的 ×），导致「先填了时刻、后想改回不填」这条路径走不通。 */
+.gv-form .f-dtrow{display:flex;gap:6px;align-items:center}
+.gv-form .f-dtrow input{flex:1 1 auto;min-width:0}
+.gv-form .f-clear{appearance:none;flex:0 0 auto;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;
+  border-radius:8px;padding:6px 9px;font-size:11.5px;font-weight:600;cursor:pointer;line-height:1;font-family:inherit;
+  transition:background .2s,border-color .2s,color .2s}
+.gv-form .f-clear:hover{background:#eef2ff;border-color:#c7d2fe;color:#4338ca}
+.gv-form .f-clear:disabled{opacity:.4;cursor:not-allowed}
+.gv-form .f-off{opacity:.45}
 .gv-form .f-owners{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
 .gv-form .f-owner{flex-direction:row;align-items:center;gap:5px;font-size:12.5px;font-weight:500;color:#334155;
   background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:5px 9px;cursor:pointer}
@@ -331,6 +348,15 @@
   /* 通道 C 的提前量（分钟）：闹钟锚在「开始时刻 − 这个值」；
      与构建端常量 ALARM_LEAD_MIN 必须一致（两侧都可由环境变量覆盖，网页端固定为 15） */
   var ALARM_LEAD_MIN = 15;
+
+  /* 通道 C 闹钟标签 = 「名称｜地点｜开始→结束时间」，空段自动省略。
+     分隔符为什么不用顿号/逗号：任务名里本身就可能含「，」（例：「去天佑会堂经管牌子集合看直播，13.15到」），
+     用全角竖线分段才不会被误读成名称的一部分。
+     与构建端 tools/build-deadlines.js 的 ALARM_LABEL_SEP / alarmLabelOf 必须同构（test/unit.js [11] 断言）。 */
+  var ALARM_LABEL_SEP = '｜';
+  function alarmLabelOf(name, where, when) {
+    return [name, where, when].filter(Boolean).join(ALARM_LABEL_SEP);
+  }
 
   /* 时刻解析：'9:5' → {h:9,mi:5,exact:true}；未填/非法 → 兜底值并标 exact:false */
   function hmParts(raw, fh, fmi) {
@@ -577,7 +603,7 @@
       '<span><i style="background:linear-gradient(90deg,#ef4444,#dc2626);border-radius:2px"></i>近3天开始·未结束(红色高亮)</span>' +
       '<span><i style="background:#cbd5e1"></i>已完成</span>' +
       '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#0e7490"></i>不同事件/节点错色区分</span>' +
-      '<span><i class="dia" style="background:#7c3aed"></i>里程碑/当日</span>' +
+      '<span><i class="dia" style="background:#7c3aed"></i>时间点/当日点</span>' +
       '<span><i style="border:1.5px dashed #6d28d9;background:transparent;height:4px;width:16px;border-radius:2px"></i>关键节点(紫圈)</span>' +
       '<span class="hint">🖱 点条/◆/标题文字/左侧名 → 详情 · 桌面 Ctrl+滚轮缩放</span>';
 
@@ -1301,7 +1327,7 @@
       var st = statusOf(task, today);
       var chips =
         '<span class="gv-chip c4">' + esc(sec.name) + '</span>' +
-        (task.milestone || task.point ? '<span class="gv-chip c1">◆ 时间点/里程碑</span>' : '<span class="gv-chip c1">▬ 时间段事件</span>') +
+        (task.milestone || task.point ? '<span class="gv-chip c1">◆ 时间点</span>' : '<span class="gv-chip c1">▬ 事件（时间段）</span>') +
         (task.crit ? '<span class="gv-chip c3">关键节点</span>' : '') +
         (String(task.name).indexOf('推测') >= 0 ? '<span class="gv-chip c1">日期为推测</span>' : '') +
         '<span class="gv-chip c4">' + (st === 'finish' ? '✓ 已过' : (st === 'going' ? '● 已到/进行' : '○ 未开始')) + '</span>';
@@ -1444,15 +1470,22 @@
     /* 起止文案（分钟级）：「9.10 14:00 → 9.10 17:00」；未填时刻的推定值以「~」标出 */
     function remWhenText(task) { return whenTextOf(task); }
     /* ---- 通道 C（快捷指令 → 「时钟」App 闹钟）----
-       闹钟「时间」= 开始时刻 − 15 分钟（alarmAtOf / alarmHMOf）；「标签」= 名称 + 起止日期时间
+       只对【今天开始】的条目建闹钟（时钟闹钟没有日期维度，见 remAlarmCandidates 的三道筛）；
+       「时间」= 开始时刻 − 15 分钟（alarmAtOf / alarmHMOf）；「标签」= 名称｜地点｜开始→结束时间
        （与构建端 tools/build-deadlines.js 的 alarmAt / alarmTime / alarmLabel 同一口径，
         改任一侧都要同步另一侧；test/unit.js [11] 有跨端断言） */
     function remAlarmName(task) {
       var ev = eventsData[task.id] || {};
       return ev.short || task.name;
     }
-    function remAlarmLabel(task) { return remAlarmName(task) + ' ' + alarmWhenOf(task); }
-    /* 闹钟清单的每一行：名称+起止，第二行给出闹钟时刻 */
+    function remAlarmWhere(task) {
+      var ev = eventsData[task.id] || {};
+      return String(ev.where || '').trim();
+    }
+    function remAlarmLabel(task) {
+      return alarmLabelOf(remAlarmName(task), remAlarmWhere(task), alarmWhenOf(task));
+    }
+    /* 闹钟清单的每一行：第一行 = 闹钟标签原文（与快捷指令实际写入的内容一致），第二行给出闹钟时刻 */
     function remAlarmLine(task) {
       var d = alarmAtOf(task);
       var when = d ? fmtMD(d) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) : '—';
@@ -1494,11 +1527,11 @@
           '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部 · 时间取自编辑表单的日期/时刻组件，未填「时刻」按 00:00 / 23:59 计（带 ~ 标记）</div>' +
           '<div class="gv-rem-sys">' +
           '  <button type="button" class="gv-rem-btn" data-act="ics" title="下载 .ics：在 iPhone「文件」中打开即写入系统日历，截止前 30 分钟与到点各响一次">📅 加入系统日历</button>' +
-          '  <button type="button" class="gv-rem-btn" data-act="alarm" title="唤起快捷指令「甘特图闹钟」：闹钟时间 = 该条【开始时刻前 15 分钟】，标签 = 「名称 + 起止日期时间」，在「时钟」App 中生成真正的系统闹钟">⏰ 同步系统闹钟</button>' +
+          '  <button type="button" class="gv-rem-btn" data-act="alarm" title="唤起快捷指令「甘特图闹钟」：只对【今天开始】的条目，在【开始时刻前 15 分钟】各建一个闹钟，标签 = 「名称｜地点｜开始→结束时间」，在「时钟」App 中生成真正的系统闹钟">⏰ 同步系统闹钟</button>' +
           '  <button type="button" class="gv-rem-btn" data-act="copy" title="复制精确到分钟的截止清单">📋 复制清单</button>' +
           '  <button type="button" class="gv-rem-btn" data-act="sub" title="复制可订阅的日历地址（iPhone：设置 → 日历 → 账户 → 添加订阅日历）">🔗 订阅地址</button>' +
           '</div>' +
-          '<div class="gv-rem-note" id="gv-rem-note">📅 原生日历+闹铃（全平台通用） · ⏰ 快捷指令创建系统闹钟：时间 = 开始前 15 分钟，标签 = 「名称 + 起止时间」（需 iPhone 已装「甘特图闹钟」，步骤见 docs/ios-system-alarm-setup.md）</div>';
+          '<div class="gv-rem-note" id="gv-rem-note">📅 原生日历+闹铃（全平台通用） · ⏰ 快捷指令创建系统闹钟：只设【今天开始】的条目，时间 = 开始前 15 分钟，标签 = 「名称｜地点｜开始→结束时间」（需 iPhone 已装「甘特图闹钟」，步骤见 docs/ios-system-alarm-setup.md）</div>';
         root.appendChild(remMask);
         root.appendChild(remPanel);
         remMask.addEventListener('click', remClose);
@@ -1689,7 +1722,7 @@
       setTimeout(function () {
         document.removeEventListener('visibilitychange', onVis);
         if (went) {
-          remNote('已唤起「' + ALARM_SHORTCUT + '」：闹钟锚在每条待办的【开始时刻前 ' + ALARM_LEAD_MIN + ' 分钟】，标签为「名称 + 起止日期时间」' +
+          remNote('已唤起「' + ALARM_SHORTCUT + '」：只对【今天开始】的条目，各建一个【开始时刻前 ' + ALARM_LEAD_MIN + ' 分钟】的闹钟，标签为「名称｜地点｜开始→结束时间」' +
             (planned ? '（本次预计 ' + planned + ' 条）' : '（今天没有已填开始时刻的待办）') +
             '。清单已复制到剪贴板。');
         } else {
@@ -1746,7 +1779,7 @@
         var cands = remAlarmCandidates();
         copyText(cands.length
           ? cands.map(remAlarmLine).join('\n')
-          : '今天没有「已填开始时刻、且闹钟时刻未过点」的待办 —— 捷径不会新建闹钟（未填时刻的条目请用 📅 加入系统日历，它有日期维度，不受此限）'
+          : '今天没有「已填开始时刻、且闹钟时刻未过点」的待办 —— 捷径不会新建闹钟（只对【今天开始】的条目建闹钟；未填时刻的条目请用 📅 加入系统日历，它有日期维度，不受此限）'
         ).catch(function () {});
         runAlarmShortcut(cands.length);
         return;
@@ -2159,7 +2192,7 @@
       var task = opts.task || null;
       var ev = opts.ev || null;
       var isNew = !!opts.isNew;
-      var kind = task ? (task.milestone ? 'milestone' : (task.crit ? 'crit' : 'normal')) : 'normal';
+      var kind = task ? (task.milestone ? 'milestone' : 'normal') : 'normal';
       var secName = task ? ((secOfTask[task.id] && secOfTask[task.id].name) || '') : model.sections[0].name;
       var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
       var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
@@ -2187,10 +2220,13 @@
         '  </div>' +
         '  <div class="f-row">' +
         '    <div class="f-col"><label>类型<select name="kind">' +
-        '      <option value="normal"' + (kind === 'normal' ? ' selected' : '') + '>普通事件（时间范围）</option>' +
-        '      <option value="milestone"' + (kind === 'milestone' ? ' selected' : '') + '>时间点 / 里程碑（◆）</option>' +
-        '      <option value="crit"' + (kind === 'crit' ? ' selected' : '') + '>关键节点（紫圈）</option>' +
-        '    </select></label></div>' +
+        '      <option value="normal"' + (kind === 'normal' ? ' selected' : '') + '>事件（有开始→结束的时间范围）</option>' +
+        '      <option value="milestone"' + (kind === 'milestone' ? ' selected' : '') + '>时间点（只有单一时刻 ◆）</option>' +
+        '    </select></label>' +
+        /* 类型只剩「事件 / 时间点」两种。「关键节点紫圈」是历史数据的强调标记（gantt.md 里的 crit），
+           不再是可选项；仅当该条原本带这个标记时才给一个开关，避免编辑一次就把标记悄悄丢掉。 */
+        (task && task.crit ? '<label class="f-check"><input type="checkbox" name="keepCrit" checked> 保留「关键节点」紫圈标记（历史数据）</label>' : '') +
+        '    </div>' +
         '    <div class="f-col"><label>是否已完成<div class="f-radio">' +
         '      <label><input type="radio" name="completed" value="done"' + (task && task.done ? ' checked' : '') + '> 已完成</label>' +
         '      <label><input type="radio" name="completed" value="undone"' + (!task || !task.done ? ' checked' : '') + '> 未完成</label>' +
@@ -2198,9 +2234,9 @@
         '  </div>' +
         '  <div class="f-row">' +
         '    <div class="f-col"><label>开始日期<input type="date" name="start" required value="' + startStr + '"></label>' +
-        '      <label class="f-time">时刻 <span class="f-hint">（可选，24小时制）</span><input type="time" name="startTime" value="' + startTStr + '"></label></div>' +
-        '    <div class="f-col"><label>结束日期 <span class="f-hint">（留空=单日；里程碑忽略）</span><input type="date" name="end" value="' + endStr + '"></label>' +
-        '      <label class="f-time">时刻 <span class="f-hint">（可选，24小时制）</span><input type="time" name="endTime" value="' + endTStr + '"></label></div>' +
+        '      <label class="f-time">时刻 <span class="f-hint">（可选，24小时制）</span><input type="time" name="startTime" value="' + startTStr + '"><button type="button" class="f-clear" data-clear="startTime" title="清除开始时刻（恢复为不填）">清除</button></label></div>' +
+        '    <div class="f-col" id="gv-endcol"><label>结束日期 <span class="f-hint" id="gv-endhint">（留空 = 单日）</span><span class="f-dtrow"><input type="date" name="end" value="' + endStr + '"><button type="button" class="f-clear" data-clear="end" title="清除结束日期（留空 = 单日）">清除</button></span></label>' +
+        '      <label class="f-time">时刻 <span class="f-hint">（可选，24小时制）</span><input type="time" name="endTime" value="' + endTStr + '"><button type="button" class="f-clear" data-clear="endTime" title="清除结束时刻（恢复为不填）">清除</button></label></div>' +
         '  </div>' +
         '  <label class="f-check"><input type="checkbox" name="isEvent"' + (ev ? ' checked' : '') + '> 含面向同学的执行说明（详情）</label>' +
         '  <div class="gv-evfields" id="gv-evfields">' +
@@ -2244,6 +2280,48 @@
       function syncEv() { evFields.style.display = isEventCb.checked ? 'block' : 'none'; }
       isEventCb.addEventListener('change', syncEv);
       syncEv();
+
+      /* v27：日期/时刻的「清除」按钮 —— 手机（及桌面）原生日期/时间控件选完后无法置空，
+         这里给一条显式出口：清空该字段并派发 change，让联动逻辑（类型联动）立即跟上。 */
+      drawer.querySelectorAll('[data-clear]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var target = btn.getAttribute('data-clear');
+          var inp = drawer.querySelector('[name="' + target + '"]');
+          if (!inp || inp.disabled) return;
+          inp.value = '';
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.focus();
+        });
+      });
+
+      /* v27：类型联动 —— 类型只剩「事件 / 时间点」两种；时间点 = 单一时刻，
+         结束日期与结束时刻随之禁用并清空（提交时也强制 end = start、endTime 为空）。 */
+      var kindSel = drawer.querySelector('[name=kind]');
+      var endDateIn = drawer.querySelector('[name=end]');
+      var endTimeIn = drawer.querySelector('[name=endTime]');
+      var endCol = drawer.querySelector('#gv-endcol');
+      function syncKind() {
+        var isPoint = !!kindSel && kindSel.value === 'milestone';
+        [endDateIn, endTimeIn].forEach(function (i) {
+          if (!i) return;
+          i.disabled = isPoint;
+          if (isPoint) i.value = '';
+        });
+        if (endCol) {
+          endCol.classList.toggle('f-off', isPoint);
+          endCol.querySelectorAll('[data-clear]').forEach(function (b) { b.disabled = isPoint; });
+        }
+        var hint = drawer.querySelector('#gv-endhint');
+        if (hint) {
+          hint.textContent = isPoint
+            ? '（时间点只有单一时刻，结束时间不可设置）'
+            : '（留空 = 单日；跨天请填结束日期）';
+        }
+      }
+      if (kindSel) {
+        kindSel.addEventListener('change', syncKind);
+        syncKind();
+      }
 
       /* v17：示例图上传预览 + 移除（图片仅暂存本地 pending，随「保存更改」统一上传） */
       var sampleFile = drawer.querySelector('[name=sampleFile]');
@@ -2409,6 +2487,10 @@
       var endTStr = String(fd.get('endTime') || '').trim();
       var isEvent = !!fd.get('isEvent');
       if (!name) { showFormErr(form, '名称不能为空'); return; }
+      /* 类型只有两种：事件（normal）/ 时间点（milestone）。关键节点紫圈是历史数据的强调标记，
+         不是类型 —— 只对「原本就带 crit」的条目保留开关，新建条目永不写入 crit。 */
+      var milestone = (kind === 'milestone');
+      var crit = !!(opts.task && opts.task.crit && fd.get('keepCrit'));
       var start = Admin.parseDate(startStr);
       if (!start) { showFormErr(form, '开始日期无效，请选择有效日期'); return; }
       /* 合并可选时刻（HH:mm，24小时制）到 Date */
@@ -2422,18 +2504,18 @@
       }
       if (startTStr) start = applyHM(start, startTStr);
       var end = Admin.parseDate(endStr);
-      if (kind === 'milestone') end = start;
+      if (milestone) end = start;
       if (!end) end = start;
-      if (!(kind === 'milestone') && endTStr) end = applyHM(end, endTStr);
-      /* 归一化为 'HH:MM' 或空串 */
-      var startT = hmOf(startTStr), endT = hmOf(endTStr);
+      if (!milestone && endTStr) end = applyHM(end, endTStr);
+      /* 归一化为 'HH:MM' 或空串；时间点没有结束时刻（提交时强制置空，
+         序列化侧会回落到开始时刻，所以已有的 `:milestone, id, 9.10 18:45, 9.10 18:45` 形态不变） */
+      var startT = hmOf(startTStr);
+      var endT = milestone ? '' : hmOf(endTStr);
       /* 同日且两端无时刻 → 结束归一到开始日期，序列化为 0d */
       if (end && (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth() && start.getDate() === end.getDate())) {
         if (!startT && !endT) end = new Date(start.getFullYear(), start.getMonth(), start.getDate());
       }
 
-      var milestone = (kind === 'milestone');
-      var crit = (kind === 'crit');
       var done = (completed === 'done');
       var active = false;
       var task = opts.task || null;
@@ -2618,5 +2700,7 @@
 
   /* 纯函数导出：给 test/unit.js 做回归断言用（不参与页面渲染） */
   return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption,
-    alarmHMOf: alarmHMOf, alarmWhenOf: alarmWhenOf, alarmAtOf: alarmAtOf, alarmLeadMin: ALARM_LEAD_MIN, evKeysOf: evKeysOf, evDriftKeys: evDriftKeys };
+    alarmHMOf: alarmHMOf, alarmWhenOf: alarmWhenOf, alarmAtOf: alarmAtOf, alarmLeadMin: ALARM_LEAD_MIN,
+    alarmLabelOf: alarmLabelOf, alarmLabelSep: ALARM_LABEL_SEP,
+    evKeysOf: evKeysOf, evDriftKeys: evDriftKeys };
 });
