@@ -171,7 +171,7 @@ check(Viewer.hmOf('9:5') === '09:05' && Viewer.hmOf('') === '', '时刻归一：
 /* ---- 9. 生成物口径一致（deadlines.json ↔ deadlines.ics） ---- */
 console.log('[9] 生成物口径一致');
 const dj = JSON.parse(fs.readFileSync(path.join(ROOT, 'deadlines.json'), 'utf8'));
-check(dj.schema === 2, 'deadlines.json schema = 2（新增分钟级 start/due/window 字段）');
+check(dj.schema === 3, 'deadlines.json schema = 3（新增通道 C 的 startDaysLeft / alarmAt / alarmTime / alarmLabel / alarmExact 字段）');
 const w25 = dj.items.filter(i => i.id === 't25')[0];
 check(!!w25 && w25.time === '17:00', '截止时刻精确到分钟 time=' + (w25 && w25.time));
 check(!!w25 && w25.window === '9.10 14:00 → 9.10 17:00', '起止文案分钟级 window=' + (w25 && w25.window));
@@ -203,6 +203,45 @@ delete stale.b7;
 check(Viewer.evDriftKeys(realSrc, stale).join(',') === 'b7', '本地缺 b7 时能识别出漂移 b7（本次真实事故场景）');
 check(Viewer.evDriftKeys('', Events).length === 0, '远端内容为空时不误报');
 check(Viewer.evDriftKeys(realSrc, null).length === 0, '无本地 events 时不误报');
+
+/* ---- 11. 通道 C 闹钟口径（名称+起止日期时间 / 开始前 15 分钟） ---- */
+console.log('[11] 通道 C 闹钟口径');
+check(dj.alarmLeadMin === 15 && Viewer.alarmLeadMin === 15,
+  '两端提前量常量一致（均为 15 分钟）');
+check(dj.items.every(i => i.alarmLead === 15), '窗口内每条都带 alarmLead = 15');
+check(dj.items.every(i => 'startDaysLeft' in i && 'alarmAt' in i && 'alarmTime' in i && 'alarmLabel' in i && 'alarmExact' in i),
+  '窗口内每条都带齐通道 C 字段（startDaysLeft / alarmAt / alarmTime / alarmLabel / alarmExact）');
+/* 跨端口径断言：网页端纯函数 vs 构建端产出，逐条比对（这是「双端必须同构」的护栏） */
+const aMis = dj.items.filter(i => { const t = model.byId(i.id); return !t || Viewer.alarmHMOf(t) !== i.alarmTime; });
+check(aMis.length === 0, '闹钟时刻两端一致（' + dj.items.length + ' 条逐条比对，不一致：' + aMis.map(i => i.id).join(',') + '）');
+const lMis = dj.items.filter(i => {
+  const t = model.byId(i.id);
+  if (!t) return true;
+  const nm = (Events[i.id] && Events[i.id].short) || t.name;
+  return nm + ' ' + Viewer.alarmWhenOf(t) !== i.alarmLabel;
+});
+check(lMis.length === 0, '闹钟标签两端一致（名称 + 起止日期时间，不一致：' + lMis.map(i => i.id).join(',') + '）');
+const c25 = dj.items.filter(i => i.id === 't25')[0];
+check(!!c25 && c25.alarmTime === '13:45', '开始前 15 分钟：t25 14:00 开始 → 闹钟 ' + (c25 && c25.alarmTime));
+check(!!c25 && Date.parse(c25.alarmAt) === Date.parse(c25.startAt) - 15 * 60000,
+  'alarmAt = startAt − 15 分钟（绝对时刻，含时区一致）');
+check(!!c25 && c25.alarmLabel === '文艺汇演领票 9.10 14:00 → 9.10 17:00',
+  'alarmLabel =「名称 + 起止日期时间」（实际「' + (c25 && c25.alarmLabel) + '」）');
+const cB7 = dj.items.filter(i => i.id === 'b7')[0];
+check(!!cB7 && cB7.alarmLabel === '交大人节”文艺晚会 9.10 18:45', '起止同刻的标签只显示一次时间（与标题 rangeCN 同口径）');
+const cM12 = dj.items.filter(i => i.id === 'm12')[0];
+check(!!cM12 && cM12.alarmTime === '12:45', '里程碑同理：m12 13:00 → 闹钟 ' + (cM12 && cM12.alarmTime));
+check(dj.items.every(i => i.alarmLabel.indexOf(i.name + ' ') === 0), 'alarmLabel 以「名称 + 空格」开头');
+/* startDaysLeft 必须按「开始日」算，否则今天开始、跨日结束的活动会被漏掉闹钟 */
+const cB6 = dj.items.filter(i => i.id === 'b6')[0];
+check(!!cB6 && cB6.startDaysLeft < cB6.daysLeft,
+  'startDaysLeft 按开始日计算（b6 8.25→9.9：startDaysLeft=' + (cB6 && cB6.startDaysLeft) + ' < daysLeft=' + (cB6 && cB6.daysLeft) + '）');
+check(!!cB6 && cB6.alarmExact === false, '未填开始时刻 → alarmExact=false（该条不应建闹钟）');
+check(dj.items.every(i => i.alarmExact === i.startExact), 'alarmExact 与 startExact 同源');
+/* 跨零点：开始 00:05 → 闹钟落在前一天 23:50，靠 Date 自动跨日而不是手工借位 */
+const midnight = { start: new Date(2026, 8, 11), end: new Date(2026, 8, 11), startTime: '00:05', endTime: '00:05' };
+check(Viewer.alarmHMOf(midnight) === '23:50', '跨零点回退正确：9.11 00:05 开始 → 闹钟 ' + Viewer.alarmHMOf(midnight));
+check(Viewer.alarmAtOf(midnight).getDate() === 10, 'alarmAtOf 自动跨日（不靠手工借位）');
 
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

@@ -30,8 +30,10 @@ gantt.md  ──(GitHub Actions 编译)──┬─▶  deadlines.json  ──(H
   https://leo372239-1024.github.io/mermaid-gantt-share/deadlines.ics
   ```
 
-- 快捷指令在本地做筛选，判断依据用 `daysLeft`（自然日天数，同一天内恒定），
+- 快捷指令在本地做筛选，判断依据用 `daysLeft`（距**截止**的自然日天数，同一天内恒定），
   不要用 `hoursLeft`（那是生成时刻的快照，几小时后会失真）。
+  若要**创建系统闹钟**，筛选依据改用 `startDaysLeft`（距**开始**的自然日天数），
+  因为闹钟锚在开始时刻而不是截止时刻。
 
 ### 常用字段（每条 item）
 
@@ -42,7 +44,11 @@ gantt.md  ──(GitHub Actions 编译)──┬─▶  deadlines.json  ──(H
 | `dueAt` / `time` | **截止**的绝对时刻 / 时分（精确到分钟） | `2026-09-10T09:00:00.000Z` / `17:00` |
 | `window` | 分钟级起止文案，可直接当通知正文 | `9.10 14:00 → 9.10 17:00` |
 | `daysLeft` | 距截止的自然日数（0=今天，负=已过期） | `0` |
+| `startDaysLeft` | 距**开始日**的自然日数（创建闹钟请用这个） | `0` |
 | `startExact` / `dueExact` | 该时刻是显式填写的还是推定值 | `true` / `false` |
+| `alarmAt` / `alarmTime` | 系统闹钟的绝对时刻 / "时:分"（= 开始前 15 分钟） | `2026-09-10T05:45:00.000Z` / `13:45` |
+| `alarmLabel` | 系统闹钟的标签（名称 + 起止日期时间） | `文艺汇演领票 9.10 14:00 → 9.10 17:00` |
+| `alarmLead` / `alarmExact` | 提前量（分钟）/ 该条能否建闹钟 | `15` / `true` |
 | `alert` / `detail` / `owner` / `where` | 一句话提醒 / 长文案 / 负责班委 / 地点 | — |
 
 > `dueExact: false` 表示甘特图里没填「时刻」，截止按**当日 23:59** 计。
@@ -145,9 +151,11 @@ gantt.md  ──(GitHub Actions 编译)──┬─▶  deadlines.json  ──(H
 留下一条闹钟记录，需要定期清理。
 
 > ⚠️ 这里有一个必须知道的坑：**时钟 App 的闹钟只有「时刻 + 重复」，不能绑定具体日期**。
-> 给"明天 09:00 截止"的待办设 09:00 闹钟，它会在**今天** 09:00 就响。
-> 因此真闹钟只对**当天到点**的待办有意义——完整做法（按 `daysLeft = 0` 过滤、
-> 一键从网页唤起、每天自动同步）见 [`ios-system-alarm-setup.md`](./ios-system-alarm-setup.md) 的通道 C。
+> 给"明天 09:00 开始"的待办设 08:45 闹钟，它会在**今天** 08:45 就响。
+> 因此真闹钟只对**当天开始**的待办有意义——完整做法（按 `startDaysLeft = 0` 过滤、
+> 闹钟时间取 `alarmAt` = **开始前 15 分钟**、标签取 `alarmLabel` = **名称 + 起止日期时间**、
+> 一键从网页唤起、每天自动同步）见
+> [`ios-system-alarm-setup.md`](./ios-system-alarm-setup.md) 的通道 C。
 
 **B. 加一个主屏徽标**
 在第 2 步之后插入「**获取字典的值**」取 `within24h`，再配合「**设置徽标数字**」

@@ -34,17 +34,64 @@ function check(cond, msg) {
   if (CHROME) opts.executablePath = CHROME;
   const browser = await pw.chromium.launch(opts);
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  /* 拦截剪贴板：通道 C 点「⏰ 同步系统闹钟」时会先把闹钟清单写进剪贴板，这里捕获它做断言
+     （headless 下没有真实剪贴板权限，必须替身；同时避免弹权限框阻塞用例） */
+  await page.addInitScript(() => {
+    window.__clip = '';
+    try {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        get() { return { writeText: t => { window.__clip = String(t); return Promise.resolve(); } }; }
+      });
+    } catch (e) { /* 失败则退化为不校验剪贴板 */ }
+  });
 
   const errors = [];
+  const extReqs = [];
+  const sameOrigin = new URL(URL_).origin;
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('console', m => {
+    if (m.type() === 'error') {
+      /* ⚠️ console 的 text 只有「Failed to load resource: net::ERR_CONNECTION_CLOSED」，
+         不带 URL —— 早期版本按 text 过滤 fonts.googleapis 是无效的（匹配不到），
+         于是第三方字体请求失败会被误报成「页面脚本错误」。这里把 location.url 一并带上。 */
+      const u = (m.location() && m.location().url) || '';
+      errors.push('console: ' + m.text() + (u ? '  @' + u : ''));
+    }
+  });
+  /* 第三方请求监控：本项目要求「零外链」——自托管字体后，页面只应请求同源资源。
+     这条断言把「第三方 CDN 挂掉/被墙导致首屏卡住或报错」变成确定性检测。 */
+  page.on('request', r => {
+    const u = r.url();
+    if (!/^https?:/i.test(u)) return;
+    let o; try { o = new URL(u).origin; } catch (e) { return; }
+    if (o !== sameOrigin) extReqs.push(u);
+  });
 
   await page.goto(URL_, { waitUntil: 'load' });
   await page.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
 
-  console.log('[1] 页面无脚本错误');
-  check(errors.filter(e => !/favicon|fonts\.googleapis/i.test(e)).length === 0,
+  console.log('[1] 页面无脚本错误 / 无第三方请求');
+  check(errors.length === 0,
     '无 pageerror / console.error' + (errors.length ? '（' + errors.slice(0, 3).join(' | ') + '）' : ''));
+  check(extReqs.length === 0,
+    '零第三方网络请求（实际 ' + extReqs.length + (extReqs.length ? '：' + extReqs.slice(0, 3).join(', ') : '') + '）');
+
+  /* 字体自托管是否真的生效：必须有一个 family=Inter 的 FontFace 已 loaded，
+     且其来源是同源的 woff2（而非 fonts.gstatic.com）。 */
+  const fontInfo = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const faces = [];
+    document.fonts.forEach(f => faces.push({ family: f.family, status: f.status, weight: f.weight }));
+    return {
+      faces: faces,
+      inter: faces.filter(f => /Inter/i.test(f.family)),
+      ok: document.fonts.check('600 16px Inter')
+    };
+  });
+  check(fontInfo.inter.length > 0 && fontInfo.inter.every(f => f.status === 'loaded'),
+    'Inter 本地字体已加载（' + (fontInfo.inter.map(f => f.family + '/' + f.weight + ':' + f.status).join(', ') || '未注册') + '）');
+  check(fontInfo.ok, 'document.fonts.check("600 16px Inter") = true');
 
   console.log('[2] 今日两条红线');
   const lines = await page.$$eval('#gv-nowlines line', els => els.map(e => ({
@@ -183,8 +230,20 @@ function check(cond, msg) {
   for (const vp of [{ w: 390, h: 844, n: '竖屏' }, { w: 844, h: 390, n: '横屏' }]) {
     const mp = await browser.newPage({ viewport: { width: vp.w, height: vp.h } });
     const merrs = [];
-    mp.on('pageerror', e => merrs.push(e.message));
-    mp.on('console', m => { if (m.type() === 'error') merrs.push(m.text()); });
+    const mext = [];
+    mp.on('pageerror', e => merrs.push('pageerror: ' + e.message));
+    mp.on('console', m => {
+      if (m.type() === 'error') {
+        const u = (m.location() && m.location().url) || '';
+        merrs.push(m.text() + (u ? '  @' + u : ''));
+      }
+    });
+    mp.on('request', r => {
+      const u = r.url();
+      if (!/^https?:/i.test(u)) return;
+      let o; try { o = new URL(u).origin; } catch (e) { return; }
+      if (o !== sameOrigin) mext.push(u);
+    });
     await mp.goto(URL_, { waitUntil: 'load' });
     await mp.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
     await mp.waitForTimeout(350);
@@ -202,7 +261,8 @@ function check(cond, msg) {
       return { px: px, zebra: blue.length, dn: dn, lab: lab, ln: ln, bars: svg.querySelectorAll('.gv-bar').length };
     });
     const tag = '[' + vp.n + '] ';
-    check(merrs.filter(e => !/favicon|fonts\.googleapis/i.test(e)).length === 0, tag + '无脚本错误');
+    check(merrs.length === 0, tag + '无脚本错误' + (merrs.length ? '（' + merrs.slice(0, 2).join(' | ') + '）' : ''));
+    check(mext.length === 0, tag + '零第三方请求（实际 ' + mext.length + '）');
     check(mr.bars >= 30, tag + '事件条渲染完整（' + mr.bars + ' 条）');
     check(mr.px > 0, tag + '逐日底色/日几何有效（px/天=' + mr.px.toFixed(2) + '）');
     check(mr.dn.length === 0 || mr.dn.every(f => Math.abs(f - 0.5) < 0.02),
@@ -217,11 +277,50 @@ function check(cond, msg) {
     await mp.close();
   }
 
-  console.log('[9] 截图存档');
+  console.log('[9] 通道 C：闹钟清单（名称 + 起止日期时间 / 开始前 15 分钟）');
+  await page.click('[data-act="remind"]');
+  await page.waitForSelector('.gv-rem-panel.on', { timeout: 5000 });
+  const alarmTitle = await page.$eval('[data-act="alarm"]', e => e.getAttribute('title'));
+  check(/开始时刻前 15 分钟/.test(alarmTitle || ''), '⏰ 按钮说明写明了「闹钟时间 = 开始时刻前 15 分钟」');
+  const noteTxt = await page.$eval('#gv-rem-note', e => e.textContent);
+  check(/时间 = 开始前 15 分钟/.test(noteTxt) && /标签 = 「名称 \+ 起止时间」/.test(noteTxt),
+    '面板提示写明「时间 = 开始前 15 分钟，标签 = 名称 + 起止时间」');
+  await page.click('[data-act="alarm"]');
+  await page.waitForTimeout(400);
+  const clip = await page.evaluate(() => window.__clip || '');
+  const almLines = clip.split('\n').filter(l => l.indexOf('⏰ 系统闹钟') >= 0);
+  const noCand = clip.indexOf('不会新建闹钟') >= 0;
+  check(clip.length > 0, '点击后写入了剪贴板（' + clip.split('\n').length + ' 行）');
+  check(noCand || almLines.length > 0,
+    noCand ? '今天无「已填开始时刻」的待办 → 给出不建闹钟的说明（正确降级）'
+      : '清单含 ' + almLines.length + ' 条闹钟行');
+  check(almLines.every(l => /⏰ 系统闹钟 \d{1,2}\.\d{1,2} \d{2}:\d{2}（开始前 15 分钟）$/.test(l)),
+    '每条闹钟行形如「⏰ 系统闹钟 <日期> <时刻>（开始前 15 分钟）」：' + (almLines[0] || '—'));
+  /* 标签必须 =「名称 +（起止或单点）日期时间」，且与紧接着的闹钟行成对出现 */
+  const bullets = clip.split('\n').filter(l => l.indexOf('· ') === 0);
+  check(bullets.length === almLines.length || noCand,
+    '每条闹钟行都对应一条名称行（' + bullets.length + ' vs ' + almLines.length + '）');
+  check(bullets.every(l => /· .+\S \d{1,2}\.\d{1,2} \d{2}:\d{2}/.test(l)),
+    '名称行形如「名称 + 起止日期时间」：' + (bullets[0] || '—'));
+  await page.click('.gv-rem-close');
+
+  console.log('[10] 截图存档');
+  /* 预览图必须是「用户刚打开页面」的默认态，而不是测试操作后的残留态
+     （前面点过缩放、点过任务、开过弹窗）。所以先整页重载再拍。 */
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(URL_, { waitUntil: 'load' });
+  await page.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    const m = document.querySelector('.gv-rem-mask'), p = document.querySelector('.gv-rem-panel');
+    if (m) m.classList.remove('on');
+    if (p) p.classList.remove('on');
+  });
+  await page.waitForTimeout(400);
   await page.screenshot({ path: path.join(__dirname, '..', 'docs', 'preview-desktop.png'), fullPage: false });
   await page.click('[data-act="remind"]');
   await page.waitForSelector('.gv-rem-panel.on');
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(__dirname, '..', 'docs', 'preview-remind.png'), fullPage: false });
   console.log('  ✓ 已输出 docs/preview-desktop.png / docs/preview-remind.png');
 

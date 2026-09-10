@@ -6,9 +6,9 @@
 <title>读研甘特图（软件2603班专属） · 北交软工2026级专硕</title>
 <link rel="icon" href="data:,">
 <meta name="description" content="读研甘特图（软件2603班专属）：北交大2026级软件工程两年制专硕入学到毕业时间线。事件标题与 ddl 提醒精确到分钟；支持年/月切换、回到今天、缩放（桌面 Ctrl+滚轮）、Ctrl+S 保存同步；点击任务可查看执行说明。今日两条红线：当前时刻（实线）与今日 24:00（虚线）。ddl 提醒可一键导出系统日历（.ics）或唤起快捷指令创建系统闹钟。">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- 字体自托管（原为 fonts.googleapis.com 外链）：该外链是渲染阻塞的，且中国大陆访问
+     Google Fonts 会被阻断 → 首屏可能长时间空白。本地同源加载，零外链、可离线。详见 fonts/fonts.css -->
+<link rel="stylesheet" href="./fonts/fonts.css?v=1">
 <style>
   :root{
     --bg:#fafafa;
@@ -27,7 +27,7 @@
   *{box-sizing:border-box;margin:0;padding:0}
   html{-webkit-text-size-adjust:100%}
   body{
-    font-family:"Inter","Plus Jakarta Sans","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-family:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
     background:var(--bg);color:var(--ink);line-height:1.6;
     -webkit-font-smoothing:antialiased;
   }
@@ -181,11 +181,11 @@
   </div>
 </div>
 
-<script src="./js/parser.js?v=24"></script>
-<script src="./js/events.js?v=24"></script>
-<script src="./js/ics.js?v=24"></script>
-<script src="./js/admin.js?v=24"></script>
-<script src="./js/viewer.js?v=24"></script>
+<script src="./js/parser.js?v=26"></script>
+<script src="./js/events.js?v=26"></script>
+<script src="./js/ics.js?v=26"></script>
+<script src="./js/admin.js?v=26"></script>
+<script src="./js/viewer.js?v=26"></script>
 <script>
   // 内置示例（仅当无法读取 gantt.md 时兜底，保证 file:// 双击也能看到效果）
   const SAMPLE_GANTT = `gantt

@@ -19,14 +19,17 @@
 | `js/viewer.js` | 自研交互式 SVG 甘特渲染器：年月切换/回到今天/缩放（桌面 Ctrl+滚轮）/点击看详情/事件错色/智能防重叠标注/逐日交替底色/**分钟级等比事件条**/双条今日红线/手机横屏整页 90° 旋转 |
 | `js/ics.js` | iCalendar(.ics) 生成器（网页「加入系统日历」与构建期 `deadlines.ics` 共用，UTC 绝对触发时刻） |
 | `vendor/mermaid.min.js` | 自托管渲染引擎 v11.17.2（仅 `editor.html` 本地编辑器使用） |
+| `fonts/fonts.css` + `fonts/inter-latin.woff2` | 自托管 Inter（Latin 子集，可变字体 400–700，48KB）。**原先引 Google Fonts，现为纯本地** —— 见下方「为什么零外链」 |
 | `editor.html` | 本地即时预览编辑器（双击打开，左侧改代码右侧实时出图） |
-| `test/unit.js` | Node 单测：解析器 + 数据完整性 + 序列化 round-trip + ics 生成器 + 分钟级时间口径（`node test/unit.js`） |
-| `tools/verify-ui.js` | 真实 Chromium 端到端自检：红线标注左右位 / 分钟级标题 / 逐日斑马纹 / 日期数字居中 / 分钟级等比事件条 / ddl 面板 / Ctrl+S / .ics 通道 + 出预览截图（开发期工具，需本机 playwright） |
+| `test/unit.js` | Node 单测（11 节 68 项）：解析器 + 数据完整性 + 序列化 round-trip + ics 生成器 + 分钟级时间口径 + 生成物一致性 + 过期快照体检 + **通道 C 闹钟口径（前后端同源校验）**（`node test/unit.js`） |
+| `tools/verify-ui.js` | 真实 Chromium 端到端自检（10 节 54 项）：**零第三方请求 / 本地字体已加载** / 红线标注左右位 / 分钟级标题 / 逐日斑马纹 / 日期数字居中 / 分钟级等比事件条 / ddl 面板 / Ctrl+S / 通道 C 闹钟清单 / 移动端竖横屏 + 出预览截图（开发期工具，需本机 playwright） |
 | `tools/build-deadlines.js` | ⭐ 把 `gantt.md` 编译成 `deadlines.json` + `deadlines.ics`（`node tools/build-deadlines.js`） |
 | `deadlines.json` | **自动生成，勿手改**：拍平后的待办清单（时间精确到分钟），iPhone 快捷指令直接读取 |
 | `deadlines.ics` | **自动生成，勿手改**：可订阅的系统日历源，一次订阅长期生效（含到点/提前两个闹铃） |
 | `docs/ios-reminder-setup.md` | iPhone 强提醒配置指南（快捷指令 + 定时自动化，零服务器） |
 | `docs/ios-system-alarm-setup.md` | iPhone **系统级闹钟/日历**配置指南（日历订阅、.ics 导入、时钟 App 真闹钟） |
+
+**为什么零外链（重要）**：本页此前用 `fonts.googleapis.com` 的样式表引入 Inter，而 `editor.html` 用的 mermaid 也已自托管。但那条字体外链有两个真实问题 —— ① `<link rel="stylesheet">` 是**渲染阻塞**的，取不到就一直白屏；② **中国大陆访问 Google Fonts 会被阻断**，而本页读者正是国内同学。现已把 Inter 的 **Latin 子集**（48KB 可变字体）下载进 `fonts/` 自托管：**整页零第三方请求、可离线打开**，首屏不再被第三方网络拖住。中文正文照旧走系统字体栈（PingFang SC / Microsoft YaHei），不需要也不应该打包 CJK 字库。
 
 **今日线原理**：渲染时按浏览器当前日期绘制两条红色竖线 —— 实线为**当前时刻**（分钟级小数天偏移，页面上每分钟自动移动，标注「现在 HH:mm」置于线**左**侧），虚线为**今日 24:00**（当日右边界，标注置于线**右**侧）。全部本地计算，无服务器、无定时任务。
 
@@ -53,7 +56,7 @@
 - **‹ 上月 / 下月 ›**：月份切换（自动给约 1.5 月跨度）
 - **📍 回到今天**：一键定位到当前日期，红线随打开当天自动更新
 - **🔔 提醒**：查看「截止时间距今不足一天」的所有待办，弹窗按最先截止排序；每项前有复选框，勾选后该项变灰、加删除线并折叠到底部（勾选状态自动保存在本机浏览器，刷新不丢失）。按钮右上角红点显示当前待办数量，无待办时不显示。
-  弹窗底部四个系统级动作：**📅 加入系统日历**（导出 `.ics`，到点由系统日历闹铃响）、**⏰ 同步系统闹钟**（唤起快捷指令，在「时钟」App 里建真闹钟）、**📋 复制清单**、**🔗 订阅地址**。
+  弹窗底部四个系统级动作：**📅 加入系统日历**（导出 `.ics`，到点由系统日历闹铃响）、**⏰ 同步系统闹钟**（唤起快捷指令，在「时钟」App 里建真闹钟：时间 = 该条**开始时刻前 15 分钟**，标签 = **名称 + 起止日期时间**；清单会先复制到剪贴板）、**📋 复制清单**、**🔗 订阅地址**。
 - **Ctrl + S / ⌘ + S**：等价于点「💾 保存更改」——把本地暂存的增删改一次性写回 GitHub（浏览器默认的「保存网页」被拦截）
 
 任务交互：
@@ -130,7 +133,7 @@ gantt
 |---|---|---|---|
 | **日历订阅 `deadlines.ics`** | 系统日历闹铃 | 一次订阅，长期生效 | **首选**；每条待办带「到点」+「提前 30 分钟」两个闹铃 |
 | **网页导出 `.ics`** | 系统日历闹铃 | 点一下按钮 | 临时/单次；UID 固定，重新导入是「更新」不重复 |
-| **快捷指令真闹钟** | 时钟 App 闹钟（最强） | 建一次指令 | 网页「⏰ 同步系统闹钟」一键唤起；只对**当天**到点的待办准确 |
+| **快捷指令真闹钟** | 时钟 App 闹钟（最强） | 建一次指令 | 网页「⏰ 同步系统闹钟」一键唤起；闹钟**时间 = 该条开始时刻前 15 分钟**，**标签 = 名称 + 起止日期时间**；只对**当天开始**的待办准确 |
 
 **为什么不直接发推送**：iOS 的通知分五档，最强的「系统级闹钟」需要原生 App 的 AlarmKit 框架，
 「关键警报」需要 Apple 单独审批的 entitlement（个人开发者基本拿不到）。**网页两条路都走不通**，
@@ -140,11 +143,12 @@ gantt
 
 ```
 gantt.md ──(GitHub Actions 自动编译)──┬─▶ deadlines.json ──▶ iPhone 快捷指令 ──▶ 时钟 App 闹钟
+                                     │                    （alarmAt / alarmLabel）
                                      └─▶ deadlines.ics  ──▶ 系统日历订阅   ──▶ 系统日历闹铃
 ```
 
 - 本地编译：`node tools/build-deadlines.js`（时区按北京时间处理；阈值可用环境变量
-  `DEADLINE_WINDOW_DAYS` / `ICS_WINDOW_DAYS` 调整）
+  `DEADLINE_WINDOW_DAYS` / `ICS_WINDOW_DAYS` / `DEADLINE_ALARM_LEAD_MIN`（默认 15 分钟）调整）
 - 自动编译：`.github/workflows/update-deadlines.yml`，在 `gantt.md` 变更时以及每天 06:00 / 18:00 各跑一次
 - 线上地址：
   - `https://leo372239-1024.github.io/mermaid-gantt-share/deadlines.json`

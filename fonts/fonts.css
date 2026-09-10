@@ -1,0 +1,21 @@
+/* Inter（Latin 子集，v20，可变字体 wght 400–700）—— 自托管，零外部依赖
+ *
+ * 为什么自托管：原先从 fonts.googleapis.com 以 <link rel="stylesheet"> 引入，
+ *  ① 该样式表是【渲染阻塞】的，取不到就一直白屏；
+ *  ② 中国大陆访问 Google Fonts 会被阻断，本页读者正是国内学生 → 首屏可能长时间空白。
+ *  改为同源加载后：无外链、可离线、首屏不再被第三方网络拖住。
+ *
+ * 文件来源：https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap
+ *  该 CSS 对 400/500/600/700 返回的是【同一个】可变字体文件（已用 md5 校验），
+ *  故只保留一份，用 font-weight: 400 700 声明字重区间。
+ * 仅保留 unicode-range 为 latin 的子集：本页正文是中文，中文走系统字体栈
+ *  （PingFang SC / Microsoft YaHei / system-ui），无需也不应下载 CJK 字库。
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}

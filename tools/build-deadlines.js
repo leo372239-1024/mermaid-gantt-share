@@ -36,6 +36,10 @@ const WINDOW_DAYS = toInt(process.env.DEADLINE_WINDOW_DAYS, 30);
 const OVERDUE_GRACE_DAYS = toInt(process.env.DEADLINE_OVERDUE_GRACE_DAYS, 1);
 /* deadlines.ics（日历订阅用）的窗口更宽：日历经得起半年量级的条目 */
 const ICS_WINDOW_DAYS = toInt(process.env.ICS_WINDOW_DAYS, 180);
+/* 通道 C（快捷指令 → 时钟 App 闹钟）的提前量：闹钟锚在「开始时刻 − N 分钟」。
+   为什么锚开始而不是截止：闹钟的作用是「把人从当前状态拉起来去做这件事」，
+   而这件事在开始时刻就已经需要人在场了（例：领票 14:00 开始，17:00 才算截止）。 */
+const ALARM_LEAD_MIN = toInt(process.env.DEADLINE_ALARM_LEAD_MIN, 15);
 
 function toInt(v, dflt) {
   const n = parseInt(v, 10);
@@ -172,6 +176,13 @@ function build() {
     const dueMs = cstToMs(y, mo, da, eh.h, eh.mi);
     const startMs = cstToMs(sy, smo, sda, sh.h, sh.mi);
     const daysLeft = cstDayNo(y, mo, da) - todayNo;
+    /* 通道 C 的筛选依据：闹钟锚在开始时刻，所以「今天该不该建闹钟」要看开始日期而不是截止日期
+       （例：今天 14:00 开始、9.12 截止的活动，按截止日算会被漏掉） */
+    const startDaysLeft = cstDayNo(sy, smo, sda) - todayNo;
+    /* 闹钟绝对时刻 = 开始时刻 − LEAD 分钟；小时/分钟用 UTC getter 读偏移后的北京时间 */
+    const alarmMs = startMs - ALARM_LEAD_MIN * 60000;
+    const alarmD = new Date(alarmMs + CST_OFFSET);
+    const alarmTime = pad2(alarmD.getUTCHours()) + ':' + pad2(alarmD.getUTCMinutes());
 
     const ev = Events[t.id];
     const displayName = (ev && ev.short) ? ev.short : t.name;
@@ -180,6 +191,11 @@ function build() {
     /* 人类可读的分钟级起止：'9.10 14:00 → 9.10 17:00'（未填时刻的推定值带 ~ 标记） */
     const windowText = fmtMd(t.start) + ' ' + (sh.exact ? '' : '~') + timeStart +
       ' → ' + fmtMd(t.end) + ' ' + (eh.exact ? '' : '~') + time;
+    /* 通道 C 的闹钟标签 = 「名称 + 起止日期时间」，例：'文艺汇演领票 9.10 14:00 → 9.10 17:00'
+       （在「时钟」App 里一眼看清是哪件事、什么时候开始什么时候结束）
+       起止同刻（时间点/里程碑）时只显示一次，与标题 rangeCN 的口径保持一致 */
+    const alarmLabel = displayName + ' ' +
+      (startMs === dueMs ? fmtMd(t.start) + ' ' + (sh.exact ? '' : '~') + timeStart : windowText);
 
     const rec = {
       id: t.id,
@@ -198,6 +214,18 @@ function build() {
       window: windowText,
       startExact: sh.exact,
       dueExact: eh.exact,
+      /* ---- 通道 C（快捷指令 → 「时钟」App 真闹钟）专用字段 ----
+         闹钟「时间」锚在开始时刻前 ALARM_LEAD_MIN 分钟；「标签」= 名称 + 起止日期时间。
+         时钟闹钟只有「时刻 + 重复」、不能绑定日期，所以快捷指令必须两道筛：
+         ① startDaysLeft === 0（今天开始）② alarmAt 仍晚于当前时刻（已过点的会顺延到明天响）。 */
+      startDaysLeft: startDaysLeft,
+      alarmLead: ALARM_LEAD_MIN,
+      alarmAt: new Date(alarmMs).toISOString(),
+      alarmTime: alarmTime,
+      alarmLabel: alarmLabel,
+      /* 只有显式填了「开始时刻」，闹钟才落在有意义的时刻；
+         未填时刻的开始按 00:00 计 → 闹钟会落到前一天 23:45，此时该条不应建闹钟 */
+      alarmExact: sh.exact,
       /* daysLeft 按自然日计算，同一天内反复读取结果恒定 —— 判断「是否该提醒」请优先用它 */
       daysLeft: daysLeft,
       /* hoursLeft 是构建时刻的快照，数小时后读取会偏小，仅适合当次即时判断 */
@@ -226,11 +254,13 @@ function build() {
   const within24hItems = items.filter(function (it) { return it.hoursLeft <= 24; });
 
   const out = {
-    schema: 2,
+    schema: 3,
     generatedAt: new Date(nowMs).toISOString(),
     timezone: 'Asia/Shanghai',
     windowDays: WINDOW_DAYS,
     icsWindowDays: ICS_WINDOW_DAYS,
+    /* 通道 C 的提前量（分钟）：闹钟锚在「开始时刻 − 这个值」 */
+    alarmLeadMin: ALARM_LEAD_MIN,
     today: now.y + '-' + pad2(now.m) + '-' + pad2(now.d),
     count: items.length,
 
@@ -294,6 +324,17 @@ console.log('[build-deadlines] 已生成 deadlines.json' + (built.ics ? ' 与 de
 console.log('  基准日期（北京）：' + result.today);
 console.log('  窗口：提醒 ' + WINDOW_DAYS + ' 天 / 日历 ' + ICS_WINDOW_DAYS + ' 天（逾期宽限 ' + OVERDUE_GRACE_DAYS + ' 天）');
 console.log('  条目：' + result.count + ' 条，其中 24 小时内到期 ' + result.within24h + ' 条；日历事件 ' + built.icsCount + ' 条');
+/* 通道 C 体检：只有「今天开始」且「显式填了开始时刻」的条目才可能建成闹钟 */
+const alarmToday = result.items.filter(function (it) { return it.startDaysLeft === 0 && it.alarmExact; });
+console.log('  通道 C 可建闹钟：' + alarmToday.length + ' 条（今天开始且有明确开始时刻，锚点 = 开始前 ' + ALARM_LEAD_MIN + ' 分钟）');
+alarmToday.forEach(function (it) {
+  console.log('   ⏰ ' + it.alarmTime + '  ' + it.alarmLabel);
+});
+const alarmSkipped = result.items.filter(function (it) { return it.startDaysLeft === 0 && !it.alarmExact; });
+if (alarmSkipped.length) {
+  console.log('   （今天开始但未填开始时刻，不建闹钟 —— 交给日历通道：' +
+    alarmSkipped.map(function (it) { return it.name; }).join('、') + '）');
+}
 result.items.forEach(function (it) {
   console.log('   · [' + it.window + '] ' + it.alert + (it.overdue ? '  ⚠ 未标记 done' : ''));
 });

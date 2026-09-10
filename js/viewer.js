@@ -42,7 +42,7 @@
 .gv-root{--gv-blue:#4f46e5;--gv-blue-50:#eef2ff;--gv-blue-100:#e0e7ff;--gv-blue-700:#3730a3;
   --gv-ink:#0f172a;--gv-body:#475569;--gv-sub:#64748b;--gv-line:#e2e8f0;--gv-line-soft:#f1f5f9;
   --gv-card:#ffffff;--gv-radius:12px;
-  font-family:"Inter","Plus Jakarta Sans","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  font-family:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   color:var(--gv-ink);--gv-rowh:30px;line-height:1.6;background:#fafafa}
 .gv-root *{box-sizing:border-box}
 .gv-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--gv-card);
@@ -321,6 +321,69 @@
     var hasTime = !!(hmOf(t.startTime) || hmOf(t.endTime));
     return s + (hasTime ? ' 至 ' : '至') + e;
   }
+  /* ================= 时刻口径（分钟级，纯函数） =================
+     为什么放在模块级：这套口径被三条链路共用 —— ①图内标题/左侧列表 ②ddl 提醒面板
+     ③通道 C 的「系统闹钟」文案（时间 = 开始前 15 分钟，标签 = 名称 + 起止）。
+     放在模块级才能被 test/unit.js 直接调到，用来与构建端 tools/build-deadlines.js
+     的 startHmOf/dueHmOf/alarmAt/alarmLabel 做跨端口径断言（两边必须同构）。
+     mount() 内部的 remHM/remStartHM/remDueHM/remWhenText/remAlarm* 都只是这里的薄封装。 */
+
+  /* 通道 C 的提前量（分钟）：闹钟锚在「开始时刻 − 这个值」；
+     与构建端常量 ALARM_LEAD_MIN 必须一致（两侧都可由环境变量覆盖，网页端固定为 15） */
+  var ALARM_LEAD_MIN = 15;
+
+  /* 时刻解析：'9:5' → {h:9,mi:5,exact:true}；未填/非法 → 兜底值并标 exact:false */
+  function hmParts(raw, fh, fmi) {
+    var m = /^(\d{1,2}):(\d{1,2})$/.exec(String(raw == null ? '' : raw).trim());
+    if (!m) return { h: fh, mi: fmi, exact: false };
+    var h = +m[1], mi = +m[2];
+    if (h > 23 || mi > 59) return { h: fh, mi: fmi, exact: false };
+    return { h: h, mi: mi, exact: true };
+  }
+  /* 开始时刻：取自编辑表单「开始日期 / 时刻」组件，未填时刻按 00:00 */
+  function startHMOf(task) { return hmParts(task.startTime, 0, 0); }
+  /* 截止时刻（唯一权威口径）：结束日期 + 结束时刻；未填结束时刻时，若起止同日且填了
+     开始时刻则用开始时刻；否则回落当日 23:59 —— 这就是「未填时刻」的默认语义 */
+  function dueHMOf(task) {
+    var e = hmParts(task.endTime, 23, 59);
+    if (e.exact) return e;
+    var s = hmParts(task.startTime, 0, 0);
+    if (s.exact && task.start && task.end && fmtYMD(task.start) === fmtYMD(task.end)) return s;
+    return e;
+  }
+  /* 起止文案（分钟级）：「9.10 14:00 → 9.10 17:00」；未填时刻的推定值以「~」标出 */
+  function whenTextOf(task) {
+    var sd = task.start || task.end, ed = task.end || task.start;
+    if (!sd || !ed) return '';
+    var s = startHMOf(task), e = dueHMOf(task);
+    return fmtMD(sd) + ' ' + (s.exact ? '' : '~') + pad(s.h) + ':' + pad(s.mi) +
+      ' → ' + fmtMD(ed) + ' ' + (e.exact ? '' : '~') + pad(e.h) + ':' + pad(e.mi);
+  }
+  /* 通道 C：闹钟绝对时刻 = 开始时刻 − ALARM_LEAD_MIN 分钟
+     （分钟传负数时 Date 自动向前跨日/跨月，无需手工借位） */
+  function alarmAtOf(task) {
+    var sd = task.start || task.end;
+    if (!sd) return null;
+    var s = startHMOf(task);
+    return new Date(sd.getFullYear(), sd.getMonth(), sd.getDate(), s.h, s.mi - ALARM_LEAD_MIN);
+  }
+  /* 通道 C：闹钟时刻「HH:mm」 */
+  function alarmHMOf(task) {
+    var d = alarmAtOf(task);
+    return d ? pad(d.getHours()) + ':' + pad(d.getMinutes()) : '';
+  }
+  /* 通道 C：闹钟标签里的起止部分 —— 起止同刻（时间点/里程碑）只显示一次，
+     与标题 rangeCN 的口径一致（构建端 alarmLabel 同此逻辑） */
+  function alarmWhenOf(task) {
+    var sd = task.start || task.end, ed = task.end || task.start;
+    if (!sd || !ed) return '';
+    var s = startHMOf(task), e = dueHMOf(task);
+    var same = (s.h === e.h && s.mi === e.mi && fmtYMD(sd) === fmtYMD(ed));
+    return same
+      ? fmtMD(sd) + ' ' + (s.exact ? '' : '~') + pad(s.h) + ':' + pad(s.mi)
+      : whenTextOf(task);
+  }
+
   /* 事件错色色板：[0]=实色(已到/进行,白字) [1]=浅色(未开始,深字) [2]=墨色(描边/浅底文字)；
      已完成任务统一灰色。序号步长 5 循环 → 相邻事件颜色差异大，便于区分 */
   var PAL = [
@@ -1365,26 +1428,12 @@
     function saveRemDone(a) {
       try { localStorage.setItem(REM_KEY, JSON.stringify(a)); } catch (e) {}
     }
-    /* 时刻解析：'9:5' → {h:9,mi:5,exact:true}；未填/非法 → 用兜底值并标 exact:false */
-    function remHM(raw, fh, fmi) {
-      var m = /^(\d{1,2}):(\d{1,2})$/.exec(String(raw == null ? '' : raw).trim());
-      if (!m) return { h: fh, mi: fmi, exact: false };
-      var h = +m[1], mi = +m[2];
-      if (h > 23 || mi > 59) return { h: fh, mi: fmi, exact: false };
-      return { h: h, mi: mi, exact: true };
-    }
-    /* 开始时刻：取自编辑表单「开始日期 / 时刻」组件，未填时刻按 00:00 */
-    function remStartHM(task) { return remHM(task.startTime, 0, 0); }
-    /* 截止时刻：取自编辑表单「结束日期 / 时刻」组件（唯一权威口径）；
-       未填结束时刻时，若该条是起止同日的时间点/里程碑且填了开始时刻，则用开始时刻；
-       否则回落当日 23:59 —— 这就是「未填时刻」的默认语义。 */
-    function remDueHM(task) {
-      var hm = remHM(task.endTime, 23, 59);
-      if (hm.exact) return hm;
-      var s = remHM(task.startTime, 0, 0);
-      if (s.exact && task.start && task.end && fmtYMD(task.start) === fmtYMD(task.end)) return s;
-      return hm;
-    }
+    /* 时刻口径全部下沉到模块级纯函数（hmParts / startHMOf / dueHMOf / whenTextOf /
+       alarmAtOf / alarmHMOf / alarmWhenOf），这里只保留既有调用名的薄封装，
+       以便与构建端 tools/build-deadlines.js 做跨端口径断言。 */
+    function remHM(raw, fh, fmi) { return hmParts(raw, fh, fmi); }
+    function remStartHM(task) { return startHMOf(task); }
+    function remDueHM(task) { return dueHMOf(task); }
     /* 任务「真实截止时间」= 结束日期 + 结束时刻，精确到分钟（不再一律按当天 23:59） */
     function remDeadlineOf(task) {
       var end = task.end || task.start;
@@ -1393,12 +1442,21 @@
       return new Date(end.getFullYear(), end.getMonth(), end.getDate(), t.h, t.mi, 0, 0).getTime();
     }
     /* 起止文案（分钟级）：「9.10 14:00 → 9.10 17:00」；未填时刻的推定值以「~」标出 */
-    function remWhenText(task) {
-      var sd = task.start || task.end, ed = task.end || task.start;
-      if (!sd || !ed) return '';
-      var s = remStartHM(task), e = remDueHM(task);
-      return fmtMD(sd) + ' ' + (s.exact ? '' : '~') + pad(s.h) + ':' + pad(s.mi) +
-        ' → ' + fmtMD(ed) + ' ' + (e.exact ? '' : '~') + pad(e.h) + ':' + pad(e.mi);
+    function remWhenText(task) { return whenTextOf(task); }
+    /* ---- 通道 C（快捷指令 → 「时钟」App 闹钟）----
+       闹钟「时间」= 开始时刻 − 15 分钟（alarmAtOf / alarmHMOf）；「标签」= 名称 + 起止日期时间
+       （与构建端 tools/build-deadlines.js 的 alarmAt / alarmTime / alarmLabel 同一口径，
+        改任一侧都要同步另一侧；test/unit.js [11] 有跨端断言） */
+    function remAlarmName(task) {
+      var ev = eventsData[task.id] || {};
+      return ev.short || task.name;
+    }
+    function remAlarmLabel(task) { return remAlarmName(task) + ' ' + alarmWhenOf(task); }
+    /* 闹钟清单的每一行：名称+起止，第二行给出闹钟时刻 */
+    function remAlarmLine(task) {
+      var d = alarmAtOf(task);
+      var when = d ? fmtMD(d) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) : '—';
+      return '· ' + remAlarmLabel(task) + '\n  ⏰ 系统闹钟 ' + when + '（开始前 ' + ALARM_LEAD_MIN + ' 分钟）';
     }
     function remLeftMs(task, now) {
       var dl = remDeadlineOf(task);
@@ -1436,11 +1494,11 @@
           '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部 · 时间取自编辑表单的日期/时刻组件，未填「时刻」按 00:00 / 23:59 计（带 ~ 标记）</div>' +
           '<div class="gv-rem-sys">' +
           '  <button type="button" class="gv-rem-btn" data-act="ics" title="下载 .ics：在 iPhone「文件」中打开即写入系统日历，截止前 30 分钟与到点各响一次">📅 加入系统日历</button>' +
-          '  <button type="button" class="gv-rem-btn" data-act="alarm" title="唤起快捷指令「甘特图闹钟」，在「时钟」App 中生成真正的系统闹钟">⏰ 同步系统闹钟</button>' +
+          '  <button type="button" class="gv-rem-btn" data-act="alarm" title="唤起快捷指令「甘特图闹钟」：闹钟时间 = 该条【开始时刻前 15 分钟】，标签 = 「名称 + 起止日期时间」，在「时钟」App 中生成真正的系统闹钟">⏰ 同步系统闹钟</button>' +
           '  <button type="button" class="gv-rem-btn" data-act="copy" title="复制精确到分钟的截止清单">📋 复制清单</button>' +
           '  <button type="button" class="gv-rem-btn" data-act="sub" title="复制可订阅的日历地址（iPhone：设置 → 日历 → 账户 → 添加订阅日历）">🔗 订阅地址</button>' +
           '</div>' +
-          '<div class="gv-rem-note" id="gv-rem-note">📅 原生日历+闹铃（全平台通用） · ⏰ 快捷指令创建系统闹钟（需 iPhone 已装「甘特图闹钟」，步骤见 docs/ios-system-alarm-setup.md）</div>';
+          '<div class="gv-rem-note" id="gv-rem-note">📅 原生日历+闹铃（全平台通用） · ⏰ 快捷指令创建系统闹钟：时间 = 开始前 15 分钟，标签 = 「名称 + 起止时间」（需 iPhone 已装「甘特图闹钟」，步骤见 docs/ios-system-alarm-setup.md）</div>';
         root.appendChild(remMask);
         root.appendChild(remPanel);
         remMask.addEventListener('click', remClose);
@@ -1622,7 +1680,7 @@
       });
     }
     /* 唤起「快捷指令」：iOS 会先问「是否在快捷指令中打开」；1.8s 后若页面未被切走则给降级提示 */
-    function runAlarmShortcut() {
+    function runAlarmShortcut(planned) {
       var went = false;
       var onVis = function () { if (document.hidden) went = true; };
       document.addEventListener('visibilitychange', onVis);
@@ -1630,8 +1688,13 @@
       catch (e) { /* 桌面浏览器无此 scheme，忽略 */ }
       setTimeout(function () {
         document.removeEventListener('visibilitychange', onVis);
-        if (went) remNote('已唤起「' + ALARM_SHORTCUT + '」——回到网页刷新即可看到结果。');
-        else remNote('未能唤起快捷指令：当前设备可能不是 iPhone，或尚未安装快捷指令「' + ALARM_SHORTCUT + '」。可改用「📅 加入系统日历」，配置步骤见 docs/ios-system-alarm-setup.md');
+        if (went) {
+          remNote('已唤起「' + ALARM_SHORTCUT + '」：闹钟锚在每条待办的【开始时刻前 ' + ALARM_LEAD_MIN + ' 分钟】，标签为「名称 + 起止日期时间」' +
+            (planned ? '（本次预计 ' + planned + ' 条）' : '（今天没有已填开始时刻的待办）') +
+            '。清单已复制到剪贴板。');
+        } else {
+          remNote('未能唤起快捷指令：当前设备可能不是 iPhone，或尚未安装快捷指令「' + ALARM_SHORTCUT + '」。可改用「📅 加入系统日历」，配置步骤见 docs/ios-system-alarm-setup.md');
+        }
       }, 1800);
     }
     /* 导出用的清单：优先「当前提醒列表里未勾选完成」的项；为空则退化为未来 60 天内的未完成项 */
@@ -1645,6 +1708,24 @@
         if (t.done || !t.end) return false;
         var dl = remDeadlineOf(t);
         return dl != null && dl >= dayStart && dl <= horizon;
+      });
+    }
+    /* 通道 C 真正能被建成闹钟的条目，判定与捷径（读 deadlines.json）完全一致：
+       ①开始日期 = 今天（时钟闹钟没有「日期」维度，非今天的会被顺延到错误的日子响）
+       ②显式填了开始时刻（未填时刻按 00:00 计 → 闹钟落到前一天 23:45，无意义）
+       ③闹钟时刻尚未过点（已过点的会被顺延到明天响，捷径侧也会剔除）
+       注意：这里必须直接从全量任务取，**不能**复用「剩余不足一天」的提醒列表 ——
+       今天开始但截止还在 24 小时以外的活动，其闹钟仍然有效，却不在提醒列表里。 */
+    function remAlarmCandidates() {
+      var today = fmtYMD(new Date());
+      var nowMs = Date.now();
+      var doneIds = loadRemDone();
+      return model.all.filter(function (t) {
+        if (t.done || doneIds.indexOf(t.id) >= 0) return false;
+        var sd = t.start || t.end;
+        if (!sd || fmtYMD(sd) !== today || !remStartHM(t).exact) return false;
+        var d = alarmAtOf(t);
+        return !!d && d.getTime() > nowMs;
       });
     }
     function remSysAction(act) {
@@ -1661,8 +1742,13 @@
         return;
       }
       if (act === 'alarm') {
-        if (list.length) { copyText(list.map(function (t) { return '· ' + remWhenText(t) + '  ' + t.name; }).join('\n')).catch(function () {}); }
-        runAlarmShortcut();
+        /* 只把「捷径真正会建闹钟」的条目复制出去，清单即"将发生什么"的预览 */
+        var cands = remAlarmCandidates();
+        copyText(cands.length
+          ? cands.map(remAlarmLine).join('\n')
+          : '今天没有「已填开始时刻、且闹钟时刻未过点」的待办 —— 捷径不会新建闹钟（未填时刻的条目请用 📅 加入系统日历，它有日期维度，不受此限）'
+        ).catch(function () {});
+        runAlarmShortcut(cands.length);
         return;
       }
       if (act === 'copy') {
@@ -2531,5 +2617,6 @@
   }
 
   /* 纯函数导出：给 test/unit.js 做回归断言用（不参与页面渲染） */
-  return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption, evKeysOf: evKeysOf, evDriftKeys: evDriftKeys };
+  return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption,
+    alarmHMOf: alarmHMOf, alarmWhenOf: alarmWhenOf, alarmAtOf: alarmAtOf, alarmLeadMin: ALARM_LEAD_MIN, evKeysOf: evKeysOf, evDriftKeys: evDriftKeys };
 });
