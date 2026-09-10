@@ -115,13 +115,13 @@
       sampleUrl: "",
       owners: owners([])
     },
-    b8: {
+    b7: {
       short: "交大人节”文艺晚会",
       who: "",
-      when: "",
+      when: "已报名的同学请于18：35前就坐。",
       where: "主校区西操场",
       files: "凭票与一卡通入场，票号将作为现场抽奖凭证。",
-      steps: ["已报名的同学请于18：35前就坐。"],
+      steps: [],
       stepImg: "",
       attachments: [],
       tips: "",
