@@ -137,5 +137,56 @@ if (r1 !== r2) evDiff++;
 check(evDiff === 0, 'serializeEvents → require 数据完全一致（含 owners / _roles，' + k1.length + ' 条）');
 check(typeof Events2.b1.owners[0].role === 'string' && Events2.b1.owners[0].role.length > 0, '序列化后再 require，owners.role 由 owners() 自动补全');
 
+/* ---- 7. ics.js 生成器（系统级日历闹铃） ---- */
+console.log('[7] ics.js 生成器');
+const Ics = require(path.join(ROOT, 'js', 'ics.js'));
+const icsSample = Ics.build([{
+  uid: 'gantt-x@test', title: '测试（中文；逗号,分号）', desc: '第一行\n第二行;含分隔符,',
+  startMs: Date.parse('2026-09-10T06:00:00Z'),   /* 北京 14:00 */
+  endMs: Date.parse('2026-09-10T09:00:00Z'),     /* 北京 17:00 */
+  location: '主校区西操场', alarmsMin: [0, -30]
+}], { calName: '测试日历' });
+check(/^BEGIN:VCALENDAR\r\n/.test(icsSample) && /END:VCALENDAR\r\n$/.test(icsSample), '以 BEGIN/END:VCALENDAR 包裹且 CRLF 结尾');
+check((icsSample.match(/BEGIN:VEVENT/g) || []).length === 1, '1 个 VEVENT');
+check((icsSample.match(/BEGIN:VALARM/g) || []).length === 2, '2 个 VALARM（到点 + 提前 30 分钟）');
+check(icsSample.indexOf('DTSTART;TZID=Asia/Shanghai:20260910T140000') >= 0, 'DTSTART 按固定 +0800 输出 14:00（不随运行环境时区漂移）');
+check(icsSample.indexOf('DTEND;TZID=Asia/Shanghai:20260910T170000') >= 0, 'DTEND 按固定 +0800 输出 17:00');
+check(icsSample.indexOf('TRIGGER;VALUE=DATE-TIME:20260910T090000Z') >= 0, '到点 VALARM 用绝对 UTC 触发时刻');
+check(icsSample.indexOf('TRIGGER;VALUE=DATE-TIME:20260910T083000Z') >= 0, '提前 30 分钟的 VALARM 用绝对 UTC 触发时刻');
+check(icsSample.indexOf('第一行\\n第二行\\;含分隔符\\,') >= 0, '换行/分号/逗号按 RFC 5545 转义');
+check(icsSample.split('\r\n').filter(l => Buffer.byteLength(l, 'utf8') > 75).length === 0, '折行后每行 ≤75 octets（中文不劈开）');
+check(Ics.build([], {}).indexOf('BEGIN:VEVENT') < 0, '空事件列表不产生 VEVENT');
+
+/* ---- 8. 分钟级时间口径（标题 / 左侧列表 / ddl 提醒共用同一套） ---- */
+console.log('[8] 分钟级时间口径');
+const t25 = model.byId('t25');     /* 文艺汇演领票 2026-09-10 14:00 → 17:00 */
+const b7 = model.byId('b7');       /* 交大人节文艺晚会 18:45（起止同刻） */
+const b3 = model.byId('b3');       /* 校外住宿登记承诺书 2026-09-13 单日点（无时刻） */
+check(Viewer.rangeCN(t25) === '9.10 14:00 至 9.10 17:00', '标题时间精确到分钟（实际「' + Viewer.rangeCN(t25) + '」）');
+check(Viewer.captionOf(t25) === '文艺汇演领票（9.10 14:00 至 9.10 17:00）', '完整标题形如「名称（起 至 止）」（实际「' + Viewer.captionOf(t25) + '」）');
+check(Viewer.rangeCN(b7) === '9.10 18:45', '起止同刻只显示一次（实际「' + Viewer.rangeCN(b7) + '」）');
+check(Viewer.rangeCN(b3) === '9.13', '未填时刻的条目保持纯日期（实际「' + Viewer.rangeCN(b3) + '」）');
+check(Viewer.hmOf('9:5') === '09:05' && Viewer.hmOf('') === '', '时刻归一：9:5→09:05，空值→空');
+
+/* ---- 9. 生成物口径一致（deadlines.json ↔ deadlines.ics） ---- */
+console.log('[9] 生成物口径一致');
+const dj = JSON.parse(fs.readFileSync(path.join(ROOT, 'deadlines.json'), 'utf8'));
+check(dj.schema === 2, 'deadlines.json schema = 2（新增分钟级 start/due/window 字段）');
+const w25 = dj.items.filter(i => i.id === 't25')[0];
+check(!!w25 && w25.time === '17:00', '截止时刻精确到分钟 time=' + (w25 && w25.time));
+check(!!w25 && w25.window === '9.10 14:00 → 9.10 17:00', '起止文案分钟级 window=' + (w25 && w25.window));
+check(!!w25 && Date.parse(w25.dueAt) === Date.parse('2026-09-10T09:00:00Z'), 'dueAt = 北京时间 17:00 的绝对时刻');
+const b2it = dj.items.filter(i => i.id === 'b2')[0];
+check(!!b2it && b2it.due === '2026-09-09', 'b2 户口迁移证截止口径 = 日期组件的 2026-09-09');
+const icsPath = path.join(ROOT, 'deadlines.ics');
+check(fs.existsSync(icsPath), 'deadlines.ics 已生成（可订阅的系统日历源）');
+if (fs.existsSync(icsPath)) {
+  const icsTxt = fs.readFileSync(icsPath, 'utf8');
+  const nEv = (icsTxt.match(/BEGIN:VEVENT/g) || []).length;
+  check(nEv >= dj.count - 1, 'ics 事件数 ≥ 提醒窗口条目数（' + nEv + ' vs ' + dj.count + '）');
+  check(nEv === (icsTxt.match(/END:VEVENT/g) || []).length, 'VEVENT 开闭标签配平');
+  check((icsTxt.match(/BEGIN:VALARM/g) || []).length === nEv * 2, '每条事件恰好 2 个 VALARM');
+}
+
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

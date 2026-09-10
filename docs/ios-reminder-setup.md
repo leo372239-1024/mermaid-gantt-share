@@ -6,26 +6,47 @@
 > 为什么不用第三方 App：iOS 的推送分五档，最强的「系统级闹钟」和「关键警报」都拿不到
 > 网页/普通开发者的权限（关键警报需要 Apple 单独审批）。而 iOS 自带的「快捷指令」可以直接
 > 调用系统计时器，**不需要服务器、不需要装任何 App、不需要 Apple 开发者账号**。
+>
+> 📌 **本文是「到点强提醒」这一条路线。** 如果你要的是**写进系统日历/时钟 App 的原生提醒**
+> （订阅一次长期生效、静音也能响的真闹钟），请直接看
+> [`ios-system-alarm-setup.md`](./ios-system-alarm-setup.md)。两套方案互不冲突，可以叠加使用。
 
 ---
 
 ## 一、整体链路
 
 ```
-gantt.md  ──(GitHub Actions 编译)──▶  deadlines.json  ──(HTTPS)──▶  iPhone 快捷指令
-                                                                        │
-                                                    遍历 → 筛出 24h 内到期 → 定时器响铃
+gantt.md  ──(GitHub Actions 编译)──┬─▶  deadlines.json  ──(HTTPS)──▶  iPhone 快捷指令
+                                   │                                    │
+                                   │              遍历 → 筛出 24h 内到期 → 计时器响铃
+                                   └─▶  deadlines.ics   ──(日历订阅)──▶  系统日历闹铃（见另一份文档）
 ```
 
-- `deadlines.json` 由 `tools/build-deadlines.js` 从 `gantt.md` + `js/events.js` 自动生成，
-  **不要手工编辑**。线上地址：
+- `deadlines.json` / `deadlines.ics` 由 `tools/build-deadlines.js` 从 `gantt.md` + `js/events.js`
+  自动生成，**不要手工编辑**。线上地址：
 
   ```
   https://leo372239-1024.github.io/mermaid-gantt-share/deadlines.json
+  https://leo372239-1024.github.io/mermaid-gantt-share/deadlines.ics
   ```
 
 - 快捷指令在本地做筛选，判断依据用 `daysLeft`（自然日天数，同一天内恒定），
   不要用 `hoursLeft`（那是生成时刻的快照，几小时后会失真）。
+
+### 常用字段（每条 item）
+
+| 字段 | 含义 | 示例 |
+|---|---|---|
+| `id` / `name` | 任务 id / 展示名 | `t25` / `文艺汇演领票` |
+| `startAt` / `startTime` | **开始**的绝对时刻 / 时分（取自日期组件） | `2026-09-10T06:00:00.000Z` / `14:00` |
+| `dueAt` / `time` | **截止**的绝对时刻 / 时分（精确到分钟） | `2026-09-10T09:00:00.000Z` / `17:00` |
+| `window` | 分钟级起止文案，可直接当通知正文 | `9.10 14:00 → 9.10 17:00` |
+| `daysLeft` | 距截止的自然日数（0=今天，负=已过期） | `0` |
+| `startExact` / `dueExact` | 该时刻是显式填写的还是推定值 | `true` / `false` |
+| `alert` / `detail` / `owner` / `where` | 一句话提醒 / 长文案 / 负责班委 / 地点 | — |
+
+> `dueExact: false` 表示甘特图里没填「时刻」，截止按**当日 23:59** 计。
+> 想让它精确到分钟，就在编辑表单的「时刻」里填上。
 
 ---
 
@@ -54,7 +75,7 @@ gantt.md  ──(GitHub Actions 编译)──▶  deadlines.json  ──(HTTPS)�
 | 4 | **对每个项目重复** | 重复对象选 **[字典值]**（即上一步的 items 数组） |
 | 5 | **获取字典的值** | 获取 **[重复项目]** 中的 **[daysLeft]** |
 | 6 | **如果** | 条件：**[字典值]** `小于或等于` `1` |
-| 7 | **添加到变量** | 把 **[重复项目]** 的 **[alert]** 添加到变量 `命中` |
+| 7 | **添加到变量** | 把 **[重复项目]** 的 **[name]** 与 **[window]** 拼成一行（用「文本」动作拼：`[name] —— [window]`），添加到变量 `命中` |
 | 8 | **结束如果** | 关闭第 6 步的块 |
 | 9 | **结束重复** | 关闭第 4 步的块 |
 | 10 | **如果** | 条件：变量 `命中` `有任何值` |
@@ -119,9 +140,14 @@ gantt.md  ──(GitHub Actions 编译)──▶  deadlines.json  ──(HTTPS)�
 ## 七、进阶变体
 
 **A. 换成真闹钟（响得更久，但会累积）**
-把第 12 步的「开始计时器」换成「**添加闹钟**」，时间设为当前时间 + 1 分钟。
+把第 12 步的「开始计时器」换成「**创建闹钟**」，时间设为当前时间 + 1 分钟。
 系统闹钟会一直响到你手动关闭，强度比计时器更高。代价是每次运行都会在「时钟」App 里
-留下一条闹钟记录，需要定期清理，因此只建议在关键节点（如论文送审、答辩）临时启用。
+留下一条闹钟记录，需要定期清理。
+
+> ⚠️ 这里有一个必须知道的坑：**时钟 App 的闹钟只有「时刻 + 重复」，不能绑定具体日期**。
+> 给"明天 09:00 截止"的待办设 09:00 闹钟，它会在**今天** 09:00 就响。
+> 因此真闹钟只对**当天到点**的待办有意义——完整做法（按 `daysLeft = 0` 过滤、
+> 一键从网页唤起、每天自动同步）见 [`ios-system-alarm-setup.md`](./ios-system-alarm-setup.md) 的通道 C。
 
 **B. 加一个主屏徽标**
 在第 2 步之后插入「**获取字典的值**」取 `within24h`，再配合「**设置徽标数字**」
@@ -154,8 +180,13 @@ gantt.md  ──(GitHub Actions 编译)──▶  deadlines.json  ──(HTTPS)�
 缺点是每位同学都要安装 Bark、在 App 内单独授权「重要警告」，并把 device key 汇总给你。
 
 **Q：数据多久更新一次？**
-`gantt.md` 每次 push 后 GitHub Actions 会自动重建 `deadlines.json`；
+`gantt.md` 每次 push 后 GitHub Actions 会自动重建 `deadlines.json` 与 `deadlines.ics`；
 此外每天 06:00 和 18:00（北京时间）各定时重建一次，用于刷新 `daysLeft` 这类相对字段。
+
+**Q：截止时间是精确到分钟的吗？**
+是。`time` / `dueAt` 取自编辑表单里「结束日期 + 时刻」两个组件，例如「文艺汇演领票」
+的截止是 `17:00`（`dueAt = 2026-09-10T09:00:00.000Z`）。若某项没填「时刻」，
+则按当日 `23:59` 计，并把 `dueExact` 标为 `false` 供你判断。
 
 **Q：为什么第 1 步的 URL 是 `deadlines.json` 而不是 `gantt.md`？**
 `gantt.md` 是 Mermaid 语法，快捷指令解析它需要处理 section 层级、状态词、

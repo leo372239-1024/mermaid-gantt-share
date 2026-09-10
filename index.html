@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>读研甘特图（软件2603班专属） · 北交软工2026级专硕</title>
 <link rel="icon" href="data:,">
-<meta name="description" content="读研甘特图（软件2603班专属）：北交大2026级软件工程两年制专硕入学到毕业时间线。支持年/月切换、回到今天、缩放（桌面 Ctrl+滚轮）；点击任务可查看执行说明（面向同学）。今日红色竖线随打开当天自动更新。">
+<meta name="description" content="读研甘特图（软件2603班专属）：北交大2026级软件工程两年制专硕入学到毕业时间线。事件标题与 ddl 提醒精确到分钟；支持年/月切换、回到今天、缩放（桌面 Ctrl+滚轮）、Ctrl+S 保存同步；点击任务可查看执行说明。今日两条红线：当前时刻（实线）与今日 24:00（虚线）。ddl 提醒可一键导出系统日历（.ics）或唤起快捷指令创建系统闹钟。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -153,7 +153,10 @@
       ③ <b>看详情</b>：点击 <b>任务条 / ◆ 节点 / 标题文字 / 左侧名称</b> 弹出该事件执行说明（详情、负责人、时间地点、步骤提醒）<br>
       ④ <b>视图</b>：右上角 <b>⇄ 横屏视图</b> 切换 常规视图 ↔ 整页向右旋转 90°（整个网页旋转，手机横着看更清晰）；手机横屏时自动切换<br>
       ⑤ <b>定位</b>：点击左侧事件名称 → 自动滚动到该事件日期并高亮闪烁<br>
-      红色竖线 = 今日，随<b>打开当天</b>自动更新，无需任何操作
+      ⑥ <b>ddl 提醒</b>：工具栏 <b>🔔 提醒</b> 列出「截止不足一天」的待办，时间精确到分钟；弹窗底部可
+      <b>📅 加入系统日历</b>（.ics，到点由系统日历闹铃响，能穿透静音）、<b>⏰ 同步系统闹钟</b>、<b>📋 复制清单</b>、<b>🔗 订阅地址</b><br>
+      ⑦ <b>保存同步</b>：管理员登录后按 <b>Ctrl + S</b>（Mac 为 ⌘ + S）= 点「💾 保存更改」，把本地改动一次性写回仓库<br>
+      红色竖线共 <b>2 条</b>：实线 = <b>当前时刻</b>（每分钟自动移动），虚线 = <b>今日 24:00</b>，随<b>打开当天</b>自动更新
     </div>
   </div>
 </footer>
@@ -178,10 +181,11 @@
   </div>
 </div>
 
-<script src="./js/parser.js?v=21"></script>
-<script src="./js/events.js?v=21"></script>
-<script src="./js/admin.js?v=21"></script>
-<script src="./js/viewer.js?v=21"></script>
+<script src="./js/parser.js?v=22"></script>
+<script src="./js/events.js?v=22"></script>
+<script src="./js/ics.js?v=22"></script>
+<script src="./js/admin.js?v=22"></script>
+<script src="./js/viewer.js?v=22"></script>
 <script>
   // 内置示例（仅当无法读取 gantt.md 时兜底，保证 file:// 双击也能看到效果）
   const SAMPLE_GANTT = `gantt

@@ -33,6 +33,10 @@
   var Parser = (typeof module === 'object' && module.exports)
     ? require('./parser.js')
     : (G.GanttParser || {});
+  /* .ics 生成器（网页与构建脚本共用；缺省时相关按钮降级提示，不影响主图渲染） */
+  var Ics = (typeof module === 'object' && module.exports)
+    ? require('./ics.js')
+    : (G.GanttIcs || null);
 
   var CSS = String.raw`
 .gv-root{--gv-blue:#4f46e5;--gv-blue-50:#eef2ff;--gv-blue-100:#e0e7ff;--gv-blue-700:#3730a3;
@@ -173,6 +177,21 @@
 .gv-rem-done .gv-rem-item .mt{opacity:.55}
 .gv-rem-done .gv-rem-item .chip{background:#f1f5f9;color:#94a3b8}
 .gv-rem-foot{padding:10px 4px 0;font-size:11.5px;color:#94a3b8;text-align:center;border-top:1px solid #f1f5f9;margin-top:8px}
+.gv-rem-item .mt .when{color:#92400e;font-weight:600;font-variant-numeric:tabular-nums}
+/* 系统级提醒通道按钮组 */
+.gv-rem-sys{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9}
+.gv-rem-btn{appearance:none;border:1px solid #e2e8f0;background:#fff;color:#334155;border-radius:9px;
+  padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;line-height:1.2;
+  transition:background .2s,border-color .2s,color .2s,transform .2s}
+.gv-rem-btn:hover{background:#f8fafc;border-color:#c7d2fe;color:#4338ca;transform:translateY(-1px)}
+.gv-rem-btn:active{transform:translateY(0)}
+.gv-rem-note{margin-top:7px;font-size:11px;color:#94a3b8;line-height:1.65;word-break:break-all}
+/* 轻量提示条（Ctrl+S 保存反馈 / 系统通道反馈） */
+.gv-toast{position:fixed;left:50%;bottom:30px;transform:translate(-50%,10px);max-width:min(560px,84vw);
+  background:rgba(15,23,42,.93);color:#fff;font-size:12.5px;line-height:1.5;padding:10px 18px;border-radius:12px;
+  z-index:70;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;text-align:center;
+  box-shadow:0 12px 32px -10px rgba(15,23,42,.5)}
+.gv-toast.on{opacity:1;transform:translate(-50%,0)}
 .gv-rem-close{position:absolute;top:12px;right:12px;border:none;background:#f1f5f9;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;color:#475569}
 .gv-rem-close:hover{background:#e2e8f0}
 /* ---- 管理员 CRUD 表单 ---- */
@@ -284,12 +303,23 @@
     if (start <= today && today <= end) return 'going';
     return 'future';
   }
-  /* 「8.1至8.25」/ 当日点「9.5」 */
+  /* 单个时刻的紧凑写法：「9.10」/「9.10 14:00」（时刻归一为 2 位分钟） */
+  function fmtPt(d, time) {
+    if (!d) return '';
+    var hm = hmOf(time);
+    return fmtMD(d) + (hm ? ' ' + hm : '');
+  }
+  /* 范围内紧凑写法（标题用）：
+     同日同刻 →「9.10 18:45」；纯日期 →「8.25至9.9」；
+     含时刻 →「9.10 14:00 至 9.10 17:00」（两侧留空格，避免数字与「至」粘连）
+     时刻来自 gantt.md 里「日期 时:分」的 OO 段，精确到分钟。 */
   function rangeCN(t) {
     if (!t.start) return '';
-    var s = fmtMD(t.start);
-    if (t.point || t.milestone) return s;
-    return s + '至' + fmtMD(t.end);
+    var s = fmtPt(t.start, t.startTime);
+    var e = t.end ? fmtPt(t.end, t.endTime) : '';
+    if (!e || s === e) return s;
+    var hasTime = !!(hmOf(t.startTime) || hmOf(t.endTime));
+    return s + (hasTime ? ' 至 ' : '至') + e;
   }
   /* 事件错色色板：[0]=实色(已到/进行,白字) [1]=浅色(未开始,深字) [2]=墨色(描边/浅底文字)；
      已完成任务统一灰色。序号步长 5 循环 → 相邻事件颜色差异大，便于区分 */
@@ -448,6 +478,16 @@
     var svgEl = root.querySelector('#gv-svg');
     var legendEl = root.querySelector('#gv-legend');
 
+    /* 轻量提示条：3.4s 自动消失（Ctrl+S 保存反馈、系统提醒通道反馈等共用） */
+    var toastEl = null, toastTimer = null;
+    function toast(msg) {
+      if (!toastEl) { toastEl = el('div', 'gv-toast'); root.appendChild(toastEl); }
+      toastEl.textContent = msg;
+      toastEl.classList.add('on');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { toastEl.classList.remove('on'); }, 3400);
+    }
+
     /* 解析告警 */
     if (model.warnings && model.warnings.length) {
       var warnEl = el('div', 'gv-warn', '⚠ 解析提示（不阻塞渲染，可忽略或修正语法）：\n' + esc(model.warnings.slice(0, 6).join('\n')));
@@ -456,7 +496,7 @@
 
     /* ---- 图例 ---- */
     legendEl.innerHTML =
-      '<span><i class="today"></i>今日线(随打开自动更新)</span>' +
+      '<span><i class="today"></i>今日 2 条红线：现在(实线) / 24:00(虚线)</span>' +
       '<span><i style="background:linear-gradient(90deg,#ef4444,#dc2626);border-radius:2px"></i>近3天开始·未结束(红色高亮)</span>' +
       '<span><i style="background:#cbd5e1"></i>已完成</span>' +
       '<span><i style="background:#4f46e5"></i><i style="background:#7c3aed"></i><i style="background:#047857"></i><i style="background:#0e7490"></i>不同事件/节点错色区分</span>' +
@@ -559,8 +599,73 @@
       return clamp(Math.floor((cap - AXIS_H) / trackCount), 20, 46);
     }
 
+    /* ---- 今日两条红线：① 当前时刻（分钟级） ② 今日 24:00 ----
+       为什么是两条：只画一条「今日」竖线时，看不出当天还剩多少时间、也定位不到此刻在一天中的位置。
+       ① 走分钟级小数天偏移，随打开/每分钟自动重绘；② 是当日右边界（24:00 == 次日 00:00），固定不动。 */
+    function xOfDayFrac(d, frac, px) {
+      return LEFT_PAD + (diffDays(minDate, dateOnly(d)) + frac) * px;
+    }
+    function redLineXs(px) {
+      if (!hasTodayInRange) return [];
+      var n = new Date();
+      var fracNow = (n.getHours() * 60 + n.getMinutes()) / 1440;
+      return [xOfDayFrac(n, fracNow, px), xOfDayFrac(n, 1, px)];
+    }
+    /* 两条红线的 SVG 片段（px/totalH 由调用方传入；单列成函数是为了让①线能被定时刷新，无需整图重绘） */
+    function nowLinesSVG(px, totalH, worldW, monthLabelXs) {
+      if (!hasTodayInRange) return '';
+      var xs = redLineXs(px);
+      var n = new Date();
+      var nowHM = pad(n.getHours()) + ':' + pad(n.getMinutes());
+      var out = '';
+      /* ① 当前时刻：实线 + 顶行标签（顶行 y=AXIS_H-18 与月份标签(y=AXIS_H-7)错开一行，避免撞字） */
+      out += '<line x1="' + xs[0].toFixed(1) + '" y1="' + AXIS_H + '" x2="' + xs[0].toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="2.2" opacity=".95"/>';
+      if (xs[0] >= LEFT_PAD && xs[0] <= worldW - RIGHT_PAD) {
+        var labNow = '现在 ' + nowHM;
+        var fitsRight = (xs[0] + 6 + estW(labNow, 10.5)) <= (worldW - RIGHT_PAD + 6);
+        out += '<text x="' + (fitsRight ? xs[0] + 6 : xs[0] - 6).toFixed(1) + '" y="' + (AXIS_H - 18) +
+          '" text-anchor="' + (fitsRight ? 'start' : 'end') + '" font-size="10.5" font-weight="700" fill="#ef4444">' + labNow + '</text>';
+      }
+      /* ② 今日 24:00：虚线 + 与月份标签同行的右对齐标签（月份标签占位时省略文字，只留线） */
+      out += '<line x1="' + xs[1].toFixed(1) + '" y1="' + AXIS_H + '" x2="' + xs[1].toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="1.6" stroke-dasharray="5 4" opacity=".8"/>';
+      var labEod = '今日 24:00';
+      if (xs[1] >= LEFT_PAD && xs[1] <= worldW - RIGHT_PAD) {
+        var nearMonth = false;
+        for (var mi2 = 0; mi2 < monthLabelXs.length; mi2++) {
+          if (Math.abs(xs[1] - monthLabelXs[mi2]) < 74) { nearMonth = true; break; }
+        }
+        if (!nearMonth) {
+          out += '<text x="' + (xs[1] - 5).toFixed(1) + '" y="' + (AXIS_H - 7) + '" text-anchor="end" font-size="10.5" font-weight="700" fill="#ef4444">' + labEod + '</text>';
+        }
+      }
+      return out;
+    }
+    /* 「现在」线每分钟刷新一次（只在分钟数变化时改 DOM；页面隐藏时跳过，不白发算力） */
+    var nowTimer = null;
+    var lastNowMin = '';
+    function tickNowLine() {
+      if (document.hidden) return;
+      var n = new Date();
+      var key = n.getFullYear() + '-' + n.getMonth() + '-' + n.getDate() + ' ' + n.getHours() + ':' + n.getMinutes();
+      if (key === lastNowMin) return;
+      lastNowMin = key;
+      /* ① 两条红线需要刷新（「现在」线每分钟移动，「今日 24:00」线跨天后整体右移一天） */
+      var g = svgEl.querySelector('#gv-nowlines');
+      if (g) {
+        var px = pxPerDay();
+        var wW = parseFloat(svgEl.getAttribute('width')) || 0;
+        var tH = parseFloat(svgEl.getAttribute('height')) || 0;
+        g.innerHTML = nowLinesSVG(px, tH, wW, curMonthLabelXs);
+      }
+      /* ② 提醒角标依赖「剩余时长」，跨分钟后可能变化 */
+      try { remUpdateBadge(); } catch (e) {}
+    }
+    if (nowTimer) { clearInterval(nowTimer); nowTimer = null; }
+    nowTimer = setInterval(tickNowLine, 20000);
+
     /* ---- 绘制 ---- */
     var flashId = null;
+    var curMonthLabelXs = [];
     function redraw(centerDate) {
       var px = pxPerDay();
       var layout = computeTracks();
@@ -604,8 +709,8 @@
           lastLabelX = xm;
         }
       }
-      /* 天刻度：逐日细网格 + 【每一天】数字刻度（px 足够时全部显示，随缩放自动取舍；避开月份/今日文字） */
-      var todayX = hasTodayInRange ? xOf(today) : -9999;
+      /* 天刻度：逐日细网格 + 【每一天】数字刻度（px 足够时全部显示，随缩放自动取舍；避开月份/红线文字） */
+      var redXs = redLineXs(px);
       if (px >= 6) {
         for (var di = 0; di <= totalDays; di++) {
           var ddx = LEFT_PAD + di * px;
@@ -616,7 +721,8 @@
           for (var dj = 0; dj <= totalDays; dj++) {
             var ddt = addDays(minDate, dj);
             var ddx2 = LEFT_PAD + dj * px;
-            var tooNear = Math.abs(ddx2 - todayX) < 12;
+            var tooNear = false;
+            for (var ri = 0; !tooNear && ri < redXs.length; ri++) { if (Math.abs(ddx2 - redXs[ri]) < 12) tooNear = true; }
             for (var mi = 0; !tooNear && mi < monthLabelXs.length; mi++) {
               if (Math.abs(ddx2 - monthLabelXs[mi]) < 10) tooNear = true;
             }
@@ -626,6 +732,7 @@
           }
         }
       }
+      curMonthLabelXs = monthLabelXs;
       /* 轨道分隔线 */
       for (var kk = 1; kk < layout.trackCount; kk++) {
         var yy = yOfTrack(kk);
@@ -633,12 +740,9 @@
       }
       S += '</g>';
 
-      /* 今日竖线（纯红色 #ef4444；SVG 渐变在零宽竖线上 objectBoundingBox 会失效，改用纯色最稳） */
-      if (hasTodayInRange) {
-        var tx = xOf(today);
-        S += '<g><line x1="' + tx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + tx.toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="2.2" opacity=".95"/>' +
-          '<text x="' + (tx + 6).toFixed(1) + '" y="' + (AXIS_H - 7) + '" font-size="10.5" font-weight="700" fill="#ef4444">今日</text></g>';
-      }
+      /* 今日两条红线（纯红 #ef4444；SVG 渐变在零宽竖线上会失效，故用纯色）：
+         ① 当前时刻（分钟级，独立 #gv-nowlines 组，可被 tickNowLine 单独刷新） ② 今日 24:00 */
+      S += '<g id="gv-nowlines">' + nowLinesSVG(px, totalH, worldW, monthLabelXs) + '</g>';
 
       /* ================= 绘制事件（两遍：先画条收集占用矩形，再放里程碑与防重叠标注） ================= */
       var barRects = [];    // 已画元素占用 {x1,y1,x2,y2}
@@ -1041,11 +1145,24 @@
       return;
     }, { passive: false });
 
-    /* 键盘左右（桌面） */
+    /* 键盘（桌面）：← / → 横向滚动；Ctrl / ⌘ + S = 保存同步（等价于工具栏「💾 保存更改」） */
     document.addEventListener('keydown', function (e) {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       var tag = document.activeElement && document.activeElement.tagName;
-      if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+      var inField = (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' ||
+        !!(document.activeElement && document.activeElement.isContentEditable));
+      /* Ctrl/⌘ + S → 保存同步（浏览器默认行为是「保存网页」，必须先拦截） */
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === 's') {
+        e.preventDefault();
+        if (!isAdmin) { toast('Ctrl+S = 保存同步：当前未登录管理员。点右上角「🔒 管理员」登录后即可使用。'); return; }
+        var sbtn = toolbar.querySelector('[data-act="save"]');
+        if (!sbtn) { toast('未找到保存按钮，请刷新页面后重试。'); return; }
+        if (!hasPending()) { toast('✅ 当前没有未保存的改动（Ctrl+S = 保存同步）。'); return; }
+        toast('💾 正在保存同步到 GitHub…');
+        sbtn.click();
+        return;
+      }
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (inField) return;
       var dx = e.key === 'ArrowLeft' ? -pw() * 0.7 : pw() * 0.7;
       scrollEl.scrollBy({ left: dx, behavior: 'smooth' });
     });
@@ -1213,11 +1330,40 @@
     function saveRemDone(a) {
       try { localStorage.setItem(REM_KEY, JSON.stringify(a)); } catch (e) {}
     }
-    /* 任务「真实截止时间」= end/start 当天 23:59:59.999 */
+    /* 时刻解析：'9:5' → {h:9,mi:5,exact:true}；未填/非法 → 用兜底值并标 exact:false */
+    function remHM(raw, fh, fmi) {
+      var m = /^(\d{1,2}):(\d{1,2})$/.exec(String(raw == null ? '' : raw).trim());
+      if (!m) return { h: fh, mi: fmi, exact: false };
+      var h = +m[1], mi = +m[2];
+      if (h > 23 || mi > 59) return { h: fh, mi: fmi, exact: false };
+      return { h: h, mi: mi, exact: true };
+    }
+    /* 开始时刻：取自编辑表单「开始日期 / 时刻」组件，未填时刻按 00:00 */
+    function remStartHM(task) { return remHM(task.startTime, 0, 0); }
+    /* 截止时刻：取自编辑表单「结束日期 / 时刻」组件（唯一权威口径）；
+       未填结束时刻时，若该条是起止同日的时间点/里程碑且填了开始时刻，则用开始时刻；
+       否则回落当日 23:59 —— 这就是「未填时刻」的默认语义。 */
+    function remDueHM(task) {
+      var hm = remHM(task.endTime, 23, 59);
+      if (hm.exact) return hm;
+      var s = remHM(task.startTime, 0, 0);
+      if (s.exact && task.start && task.end && fmtYMD(task.start) === fmtYMD(task.end)) return s;
+      return hm;
+    }
+    /* 任务「真实截止时间」= 结束日期 + 结束时刻，精确到分钟（不再一律按当天 23:59） */
     function remDeadlineOf(task) {
       var end = task.end || task.start;
       if (!end) return null;
-      return dateOnly(end).getTime() + DAY - 1;
+      var t = remDueHM(task);
+      return new Date(end.getFullYear(), end.getMonth(), end.getDate(), t.h, t.mi, 0, 0).getTime();
+    }
+    /* 起止文案（分钟级）：「9.10 14:00 → 9.10 17:00」；未填时刻的推定值以「~」标出 */
+    function remWhenText(task) {
+      var sd = task.start || task.end, ed = task.end || task.start;
+      if (!sd || !ed) return '';
+      var s = remStartHM(task), e = remDueHM(task);
+      return fmtMD(sd) + ' ' + (s.exact ? '' : '~') + pad(s.h) + ':' + pad(s.mi) +
+        ' → ' + fmtMD(ed) + ' ' + (e.exact ? '' : '~') + pad(e.h) + ':' + pad(e.mi);
     }
     function remLeftMs(task, now) {
       var dl = remDeadlineOf(task);
@@ -1252,37 +1398,50 @@
           '<p class="gv-rem-sub" id="gv-rem-sub"></p>' +
           '<div class="gv-rem-list" id="gv-rem-list"></div>' +
           '<div class="gv-rem-done" id="gv-rem-done"></div>' +
-          '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部</div>';
+          '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部 · 时间取自编辑表单的日期/时刻组件，未填「时刻」按 00:00 / 23:59 计（带 ~ 标记）</div>' +
+          '<div class="gv-rem-sys">' +
+          '  <button type="button" class="gv-rem-btn" data-act="ics" title="下载 .ics：在 iPhone「文件」中打开即写入系统日历，截止前 30 分钟与到点各响一次">📅 加入系统日历</button>' +
+          '  <button type="button" class="gv-rem-btn" data-act="alarm" title="唤起快捷指令「甘特图闹钟」，在「时钟」App 中生成真正的系统闹钟">⏰ 同步系统闹钟</button>' +
+          '  <button type="button" class="gv-rem-btn" data-act="copy" title="复制精确到分钟的截止清单">📋 复制清单</button>' +
+          '  <button type="button" class="gv-rem-btn" data-act="sub" title="复制可订阅的日历地址（iPhone：设置 → 日历 → 账户 → 添加订阅日历）">🔗 订阅地址</button>' +
+          '</div>' +
+          '<div class="gv-rem-note" id="gv-rem-note">📅 原生日历+闹铃（全平台通用） · ⏰ 快捷指令创建系统闹钟（需 iPhone 已装「甘特图闹钟」，步骤见 docs/ios-system-alarm-setup.md）</div>';
         root.appendChild(remMask);
         root.appendChild(remPanel);
         remMask.addEventListener('click', remClose);
         remPanel.querySelector('.gv-rem-close').addEventListener('click', remClose);
         remPanel.querySelector('.gv-rem-clear').addEventListener('click', remClearAll);
+        remPanel.querySelectorAll('.gv-rem-btn').forEach(function (b) {
+          b.addEventListener('click', function () { remSysAction(b.getAttribute('data-act')); });
+        });
       }
       remSubEl = remPanel.querySelector('#gv-rem-sub');
       remListEl = remPanel.querySelector('#gv-rem-list');
       remDoneEl = remPanel.querySelector('#gv-rem-done');
       remFootEl = remPanel.querySelector('.gv-rem-foot');
     }
-    /* 截止文案：剩余<=0=已到期；<12h=今日截止；否则=24h内 */
+    /* 截止文案：已过点=已到期；否则给出精确剩余时长（分钟级，如「剩 3 小时 12 分」） */
     function remChip(t, now) {
       var left = remLeftMs(t, now);
       if (left == null) return '';
       if (left <= 0) return '已到期';
-      if (left < DAY / 2) return '今日截止';
-      return '24h 内截止';
+      var mins = Math.floor(left / 60000);
+      var h = Math.floor(mins / 60), m2 = mins % 60;
+      if (h <= 0) return '剩 ' + m2 + ' 分钟';
+      return '剩 ' + h + ' 小时' + (m2 ? ' ' + m2 + ' 分' : '');
     }
     function remItemHTML(list, isDone) {
       var html = '';
+      var now = new Date();
       for (var i = 0; i < list.length; i++) {
         var t = list[i];
         var sec = secOfTask[t.id] || { name: '' };
-        var when = (t.end || t.start) ? fmtYMD(t.end || t.start) : '';
+        var when = remWhenText(t);
         html += '<label class="gv-rem-item' + (isDone ? ' done' : '') + '" data-id="' + escId(t.id) + '">' +
           '<input type="checkbox" data-id="' + escId(t.id) + '"' + (isDone ? ' checked' : '') + '>' +
           '<span style="flex:1">' +
           '  <span class="nm">' + esc(t.name) + '</span>' +
-          '  <span class="mt"><span class="chip">' + esc(remChip(t, new Date())) + ' · ' + esc(when) + '</span><span class="sec">' + esc(sec.name) + '</span></span>' +
+          '  <span class="mt"><span class="chip">' + esc(remChip(t, now)) + '</span><span class="when" title="开始 → 截止（分钟级，取自编辑表单的日期/时刻组件）">' + esc(when) + '</span><span class="sec">' + esc(sec.name) + '</span></span>' +
           '</span>' +
           '</label>';
       }
@@ -1353,6 +1512,136 @@
       if (!badge) return;
       var n = remCollect(new Date()).length;
       badge.textContent = n > 0 ? String(n) : '';
+    }
+
+    /* ================= 系统级提醒通道：导出 .ics（原生日历闹铃）/ 唤起快捷指令闹钟 ================= */
+    /* 为什么走这两条路：
+       静态网页拿不到 iOS 的 Critical Alert 权限，Web Push 也只能发普通级别通知；
+       而「日历事件 + VALARM」与「时钟 App 闹钟」都是系统原生能力，能真正穿透静音/专注。 */
+    var ALARM_SHORTCUT = '甘特图闹钟';
+    var ICS_SUB_URL = location.origin + location.pathname.replace(/[^/]*$/, '') + 'deadlines.ics';
+
+    function remNote(msg) {
+      var n = remPanel && remPanel.querySelector('#gv-rem-note');
+      if (n) n.textContent = msg;
+    }
+    /* 把当前待办列表映射成 ics.js 要的通用结构：
+       事件「起」= 截止前 pre 分钟（不早于开始时刻），「止」= 精确截止时刻；
+       两个 VALARM：到点(0) + 提前 pre 分钟，与构建期产出的 deadlines.ics 行为一致。
+       UID 固定为「gantt-<id>@…」——同一条待办改期后重新导入是「更新」而不是「新增一条」。 */
+    function buildICS(list) {
+      if (!Ics || !Ics.build) return '';
+      var events = list.map(function (t) {
+        var s = remStartHM(t), e = remDueHM(t);
+        var sd = t.start || t.end, ed = t.end || t.start;
+        var startMs = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate(), s.h, s.mi).getTime();
+        var endMs = new Date(ed.getFullYear(), ed.getMonth(), ed.getDate(), e.h, e.mi).getTime();
+        var ev = eventsData[t.id] || {};
+        var title = ev.short || t.name;
+        /* 预响时长：默认提前 30 分钟，但不超过「整段时间的一半」，也绝不早于开始时刻 */
+        var span = Math.max(60000, endMs - startMs);
+        var pre = Math.max(60000, Math.min(30 * 60 * 1000, Math.round(span / 2)));
+        var evStart = Math.max(startMs, endMs - pre);
+        var desc = [];
+        desc.push('阶段：' + ((secOfTask[t.id] && secOfTask[t.id].name) || '—'));
+        desc.push('起止：' + remWhenText(t));
+        if (ev.who) desc.push('面向：' + ev.who);
+        if (ev.where) desc.push('地点：' + ev.where);
+        if (ev.owners && ev.owners.length) desc.push('负责班委：' + ev.owners.map(function (o) { return o.name; }).join('、'));
+        desc.push('来源：读研甘特图（软件2603班专属）');
+        return {
+          uid: 'gantt-' + String(t.id).replace(/[^\w.-]/g, '') + '@mermaid-gantt-share',
+          title: '⏰ 截止：' + title,
+          startMs: evStart,
+          endMs: endMs,
+          desc: desc.join('\n'),
+          location: ev.where || '',
+          alarmsMin: [0, -Math.round(pre / 60000)],
+          alarmText: title
+        };
+      });
+      return Ics.build(events, { calName: '软件2603 · 班务截止提醒' });
+    }
+    function downloadText(name, text, mime) {
+      try {
+        var blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = name; a.style.display = 'none';
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(url); if (a.parentNode) a.parentNode.removeChild(a); }, 1500);
+        return true;
+      } catch (e) { return false; }
+    }
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      return new Promise(function (res, rej) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          ok ? res() : rej(new Error('execCommand copy 失败'));
+        } catch (e) { rej(e); }
+      });
+    }
+    /* 唤起「快捷指令」：iOS 会先问「是否在快捷指令中打开」；1.8s 后若页面未被切走则给降级提示 */
+    function runAlarmShortcut() {
+      var went = false;
+      var onVis = function () { if (document.hidden) went = true; };
+      document.addEventListener('visibilitychange', onVis);
+      try { location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(ALARM_SHORTCUT); }
+      catch (e) { /* 桌面浏览器无此 scheme，忽略 */ }
+      setTimeout(function () {
+        document.removeEventListener('visibilitychange', onVis);
+        if (went) remNote('已唤起「' + ALARM_SHORTCUT + '」——回到网页刷新即可看到结果。');
+        else remNote('未能唤起快捷指令：当前设备可能不是 iPhone，或尚未安装快捷指令「' + ALARM_SHORTCUT + '」。可改用「📅 加入系统日历」，配置步骤见 docs/ios-system-alarm-setup.md');
+      }, 1800);
+    }
+    /* 导出用的清单：优先「当前提醒列表里未勾选完成」的项；为空则退化为未来 60 天内的未完成项 */
+    function remExportList(now) {
+      var doneIds = loadRemDone();
+      var list = remCollect(now).filter(function (t) { return doneIds.indexOf(t.id) < 0; });
+      if (list.length) return list;
+      var horizon = now.getTime() + 60 * DAY;
+      var dayStart = dateOnly(now).getTime();
+      return model.all.filter(function (t) {
+        if (t.done || !t.end) return false;
+        var dl = remDeadlineOf(t);
+        return dl != null && dl >= dayStart && dl <= horizon;
+      });
+    }
+    function remSysAction(act) {
+      remEnsure();
+      var now = new Date();
+      var list = remExportList(now);
+      if (act === 'ics') {
+        var text = buildICS(list);
+        if (!text) { remNote('日历模块（js/ics.js）未加载，无法导出 .ics；请强制刷新页面（Ctrl+F5）后重试。'); return; }
+        var ok = downloadText('deadlines-' + fmtYMD(now) + '.ics', text, 'text/calendar;charset=utf-8');
+        remNote(ok
+          ? '已下载 .ics（' + list.length + ' 项）——在 iPhone 上打开该文件 →「添加到日历」，即可获得系统日历闹铃（含到点与提前提醒）。'
+          : '浏览器阻止了下载，请改用订阅地址：' + ICS_SUB_URL);
+        return;
+      }
+      if (act === 'alarm') {
+        if (list.length) { copyText(list.map(function (t) { return '· ' + remWhenText(t) + '  ' + t.name; }).join('\n')).catch(function () {}); }
+        runAlarmShortcut();
+        return;
+      }
+      if (act === 'copy') {
+        var txt = list.map(function (t) { return '· ' + remWhenText(t) + '  ' + t.name; }).join('\n');
+        copyText(txt).then(function () { remNote('已复制 ' + list.length + ' 条截止清单（分钟级）到剪贴板。'); },
+          function () { remNote('复制被浏览器拒绝，请手动长按选择文本。'); });
+        return;
+      }
+      if (act === 'sub') {
+        copyText(ICS_SUB_URL).then(function () {
+          remNote('订阅地址已复制：' + ICS_SUB_URL + '（iPhone：设置 → 日历 → 账户 → 添加订阅日历 → 粘贴）');
+        }, function () { remNote('订阅地址：' + ICS_SUB_URL); });
+        return;
+      }
     }
 
     /* ================= 管理员 CRUD（GitHub API 线上直写） ================= */
@@ -1709,11 +1998,12 @@
            effEvents 为写回后的正式数据（含 sampleUrl 直链）；无 gantt 改动时沿用当前 model 渲染 */
         if (!opts.silent) {
           reloadAfterSave(pending.ganttCode || Admin.serializeGantt(model), effEvents || eventsData);
+          toast('✅ 已保存同步到 GitHub（含 deadlines.json 重建），全班刷新即见。');
         }
       }).catch(function (err) {
         if (saveBtn) saveBtn.disabled = false;
         syncSaveBtn();
-        if (!opts.silent) alert('保存失败：' + (err && err.message ? err.message : err));
+        if (!opts.silent) { toast('❌ 保存失败：' + (err && err.message ? err.message : err)); alert('保存失败：' + (err && err.message ? err.message : err)); }
         else console.warn('[gantt] 自动同步失败：', err && err.message ? err.message : err);
       });
     }
@@ -2169,6 +2459,7 @@
       destroy: function () {
         if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
         if (bootSyncTimer) { clearTimeout(bootSyncTimer); bootSyncTimer = null; }
+        if (nowTimer) { clearInterval(nowTimer); nowTimer = null; }
         if (mask) { mask.remove(); drawer.remove(); }
         container.removeChild(root);
         container.removeChild(styleEl);
@@ -2181,5 +2472,6 @@
     };
   }
 
-  return { mount: mount };
+  /* 纯函数导出：给 test/unit.js 做回归断言用（不参与页面渲染） */
+  return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption };
 });

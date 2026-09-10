@@ -1,9 +1,10 @@
-name: 更新 deadlines.json
+name: 更新 deadlines.json / deadlines.ics
 
-# deadlines.json 是从 gantt.md + js/events.js 派生出来的通知数据。
-# 本工作流保证它在两种时机保持最新：
+# deadlines.json 与 deadlines.ics 都是从 gantt.md + js/events.js + js/ics.js 派生出来的产物。
+# 本工作流保证它们在三种时机保持最新：
 #   1) 数据源发生 push 时（改完甘特图立即生效）
-#   2) 每天定时一次（让 daysLeft / hoursLeft / within24h 这类「相对今天」的字段翻新）
+#   2) 每天定时两次（让 daysLeft / hoursLeft / within24h 这类「相对今天」的字段翻新）
+#   3) 手动触发（workflow_dispatch）
 #
 # 注意：定时任务用 UTC 表达。
 #   22:00 UTC = 次日 06:00 北京时间
@@ -17,6 +18,7 @@ on:
       - 'gantt.md'
       - 'js/events.js'
       - 'js/parser.js'
+      - 'js/ics.js'
       - 'tools/build-deadlines.js'
       - '.github/workflows/update-deadlines.yml'
   schedule:
@@ -43,17 +45,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 生成 deadlines.json
+      - name: 生成 deadlines.json 与 deadlines.ics
         run: node tools/build-deadlines.js
 
       - name: 提交变更（仅在内容有变化时）
         run: |
-          if git diff --quiet -- deadlines.json; then
-            echo "deadlines.json 无变化，跳过提交。"
+          if git diff --quiet -- deadlines.json deadlines.ics; then
+            echo "deadlines.json / deadlines.ics 无变化，跳过提交。"
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deadlines.json
-          git commit -m "chore: 自动更新 deadlines.json [skip ci]"
+          git add deadlines.json deadlines.ics
+          git commit -m "chore: 自动更新 deadlines.json / deadlines.ics [skip ci]"
           git push

@@ -25,14 +25,17 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const Parser = require(path.join(ROOT, 'js', 'parser.js'));
 const Events = require(path.join(ROOT, 'js', 'events.js'));
+const Ics = require(path.join(ROOT, 'js', 'ics.js'));
 
 const DAY = 86400000;
 const CST_OFFSET = 8 * 60 * 60 * 1000;
 
-/* 窗口：纳入「未来 N 天内到期」的任务 */
+/* 窗口：纳入「未来 N 天内到期」的任务（deadlines.json 的提醒窗口） */
 const WINDOW_DAYS = toInt(process.env.DEADLINE_WINDOW_DAYS, 30);
 /* 逾期宽限：未标记 done 又刚过期的任务，再给 1 天曝光期（多半是忘了标 done） */
 const OVERDUE_GRACE_DAYS = toInt(process.env.DEADLINE_OVERDUE_GRACE_DAYS, 1);
+/* deadlines.ics（日历订阅用）的窗口更宽：日历经得起半年量级的条目 */
+const ICS_WINDOW_DAYS = toInt(process.env.ICS_WINDOW_DAYS, 180);
 
 function toInt(v, dflt) {
   const n = parseInt(v, 10);
@@ -80,6 +83,35 @@ function ownerBrief(ev) {
   return ev.owners.map(function (o) { return o.name; }).join('、');
 }
 
+function fmtDTYMD(d, h, mi) {
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+    ' ' + pad2(h) + ':' + pad2(mi);
+}
+function fmtMd(d) { return (d.getMonth() + 1) + '.' + d.getDate(); }
+
+/* 时刻解析：合法 'H:mm' / 'HH:mm' → {h,mi,exact:true}；否则退回兜底值并标 exact:false */
+function hmOf(raw, fh, fmi) {
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(String(raw == null ? '' : raw).trim());
+  if (!m) return { h: fh, mi: fmi, exact: false };
+  const h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+  if (h > 23 || mi > 59) return { h: fh, mi: fmi, exact: false };
+  return { h: h, mi: mi, exact: true };
+}
+function startHmOf(t) { return hmOf(t.startTime, 0, 0); }
+/* 截止时刻口径（与网页端 remDueHM 完全一致，两处必须同时改）：
+   结束日期 + 结束时刻；未填结束时刻时，若起止同日且填了开始时刻则用开始时刻；否则回落 23:59 */
+function dueHmOf(t) {
+  const e = hmOf(t.endTime, 23, 59);
+  if (e.exact) return e;
+  const s = hmOf(t.startTime, 0, 0);
+  const sameDay = t.start && t.end &&
+    t.start.getFullYear() === t.end.getFullYear() &&
+    t.start.getMonth() === t.end.getMonth() &&
+    t.start.getDate() === t.end.getDate();
+  if (s.exact && sameDay) return s;
+  return e;
+}
+
 /* ---------- 文案 ---------- */
 
 function dueText(daysLeft, time) {
@@ -123,42 +155,49 @@ function build() {
   });
 
   const items = [];
+  const icsItems = [];
 
   model.all.forEach(function (t) {
     if (!t.end) return;
     if (t.done) return;                     // 已完成不再提醒
 
-    /* 截止时刻：带时分则用该时刻，否则默认当日 23:59（北京时间） */
-    const y = t.end.getFullYear();
-    const mo = t.end.getMonth() + 1;
-    const da = t.end.getDate();
-    const time = t.endTime || '';
-    let hh = 23, mi = 59;
-    if (time) {
-      const p = time.split(':');
-      hh = parseInt(p[0], 10);
-      mi = parseInt(p[1], 10);
-    }
+    /* 起止时刻全部取自「编辑表单的日期/时刻组件」（即 gantt.md 里的 OO 段），精确到分钟 */
+    const eh = dueHmOf(t);
+    const sh = startHmOf(t);
+    const y = t.end.getFullYear(), mo = t.end.getMonth() + 1, da = t.end.getDate();
+    const sy = t.start.getFullYear(), smo = t.start.getMonth() + 1, sda = t.start.getDate();
+    const time = pad2(eh.h) + ':' + pad2(eh.mi);
+    const timeStart = pad2(sh.h) + ':' + pad2(sh.mi);
 
-    const dueMs = cstToMs(y, mo, da, hh, mi);
+    const dueMs = cstToMs(y, mo, da, eh.h, eh.mi);
+    const startMs = cstToMs(sy, smo, sda, sh.h, sh.mi);
     const daysLeft = cstDayNo(y, mo, da) - todayNo;
-
-    if (daysLeft > WINDOW_DAYS) return;
-    if (daysLeft < -OVERDUE_GRACE_DAYS) return;
 
     const ev = Events[t.id];
     const displayName = (ev && ev.short) ? ev.short : t.name;
     const hoursLeft = Math.round((dueMs - nowMs) / 3600000);
     const overdue = daysLeft < 0;
+    /* 人类可读的分钟级起止：'9.10 14:00 → 9.10 17:00'（未填时刻的推定值带 ~ 标记） */
+    const windowText = fmtMd(t.start) + ' ' + (sh.exact ? '' : '~') + timeStart +
+      ' → ' + fmtMd(t.end) + ' ' + (eh.exact ? '' : '~') + time;
 
-    items.push({
+    const rec = {
       id: t.id,
       name: displayName,
       fullName: t.name,
       section: sectionOf[t.id] || '',
+      /* 开始：日期组件「开始日期 + 时刻」 */
+      start: sy + '-' + pad2(smo) + '-' + pad2(sda),
+      startTime: timeStart,
+      startAt: new Date(startMs).toISOString(),
+      /* 截止：日期组件「结束日期 + 时刻」（未填时刻 → 23:59；时间点且填了开始时刻 → 开始时刻） */
       due: y + '-' + pad2(mo) + '-' + pad2(da),
       time: time,
       dueAt: new Date(dueMs).toISOString(),
+      /* 分钟级起止字符串，快捷指令/通知正文可直接用 */
+      window: windowText,
+      startExact: sh.exact,
+      dueExact: eh.exact,
       /* daysLeft 按自然日计算，同一天内反复读取结果恒定 —— 判断「是否该提醒」请优先用它 */
       daysLeft: daysLeft,
       /* hoursLeft 是构建时刻的快照，数小时后读取会偏小，仅适合当次即时判断 */
@@ -170,7 +209,12 @@ function build() {
       where: (ev && ev.where) ? ev.where : '',
       alert: dueText(daysLeft, time) + ' · ' + displayName,
       detail: dueTextLong(daysLeft, time, y, mo, da)
-    });
+    };
+
+    /* deadlines.json：只收「提醒窗口」内的条目（默认 30 天） */
+    if (daysLeft <= WINDOW_DAYS && daysLeft >= -OVERDUE_GRACE_DAYS) items.push(rec);
+    /* deadlines.ics：日历窗口更宽（默认 180 天），订阅一次可长期使用 */
+    if (daysLeft <= ICS_WINDOW_DAYS && daysLeft >= -OVERDUE_GRACE_DAYS) icsItems.push(rec);
   });
 
   items.sort(function (a, b) {
@@ -182,10 +226,11 @@ function build() {
   const within24hItems = items.filter(function (it) { return it.hoursLeft <= 24; });
 
   const out = {
-    schema: 1,
+    schema: 2,
     generatedAt: new Date(nowMs).toISOString(),
     timezone: 'Asia/Shanghai',
     windowDays: WINDOW_DAYS,
+    icsWindowDays: ICS_WINDOW_DAYS,
     today: now.y + '-' + pad2(now.m) + '-' + pad2(now.d),
     count: items.length,
 
@@ -200,18 +245,56 @@ function build() {
     items: items
   };
 
-  return out;
+  /* ---------- 同源产出可订阅的 .ics ----------
+     为什么需要：静态网页发不出「系统级」通知（iOS 的 Critical Alert 需 Apple 审批，
+     Web Push 只能发普通级别、且要加到主屏幕）。而把截止项写进系统日历后，到点由 iOS
+     原生日历闹铃服务触发，能穿透静音与专注模式，且不依赖任何 App 或网页。
+     用户在 iPhone 上一次订阅：设置 → 日历 → 账户 → 添加订阅日历 → 填下面的地址。 */
+  const icsEvents = icsItems.map(function (it) {
+    const startMs = Date.parse(it.startAt);
+    const endMs = Date.parse(it.dueAt);
+    /* 预响：默认提前 30 分钟，但不超过整段时间的一半，也绝不早于开始时刻 */
+    const span = Math.max(60000, endMs - startMs);
+    const pre = Math.max(60000, Math.min(30 * 60 * 1000, Math.round(span / 2)));
+    const desc = [
+      '阶段：' + (it.section || '—'),
+      '起止：' + it.window,
+      it.owner ? '负责班委：' + it.owner : '',
+      it.where ? '地点：' + it.where : '',
+      '来源：读研甘特图（软件2603班专属）'
+    ].filter(Boolean).join('\n');
+    return {
+      uid: 'gantt-' + String(it.id).replace(/[^\w.-]/g, '') + '@mermaid-gantt-share',
+      title: '⏰ 截止：' + it.name,
+      startMs: Math.max(startMs, endMs - pre),
+      endMs: endMs,
+      desc: desc,
+      location: it.where || '',
+      alarmsMin: [0, -Math.round(pre / 60000)],
+      alarmText: it.name
+    };
+  });
+  const ics = icsEvents.length
+    ? Ics.build(icsEvents, { calName: '软件2603 · 班务截止提醒' })
+    : '';
+
+  return { out: out, ics: ics, icsCount: icsEvents.length };
 }
 
-const result = build();
+const built = build();
+const result = built.out;
 const outPath = path.join(ROOT, 'deadlines.json');
 fs.writeFileSync(outPath, JSON.stringify(result, null, 2) + '\n', 'utf8');
 
-console.log('[build-deadlines] 已生成 deadlines.json');
+if (built.ics) {
+  fs.writeFileSync(path.join(ROOT, 'deadlines.ics'), built.ics, 'utf8');
+}
+
+console.log('[build-deadlines] 已生成 deadlines.json' + (built.ics ? ' 与 deadlines.ics' : ''));
 console.log('  基准日期（北京）：' + result.today);
-console.log('  窗口：未来 ' + WINDOW_DAYS + ' 天（逾期宽限 ' + OVERDUE_GRACE_DAYS + " 天）");
-console.log('  条目：' + result.count + ' 条，其中 24 小时内到期 ' + result.within24h + ' 条');
+console.log('  窗口：提醒 ' + WINDOW_DAYS + ' 天 / 日历 ' + ICS_WINDOW_DAYS + ' 天（逾期宽限 ' + OVERDUE_GRACE_DAYS + ' 天）');
+console.log('  条目：' + result.count + ' 条，其中 24 小时内到期 ' + result.within24h + ' 条；日历事件 ' + built.icsCount + ' 条');
 result.items.forEach(function (it) {
-  console.log('   · [' + it.due + '] ' + it.alert + (it.overdue ? '  ⚠ 未标记 done' : ''));
+  console.log('   · [' + it.window + '] ' + it.alert + (it.overdue ? '  ⚠ 未标记 done' : ''));
 });
 if (result.count === 0) console.log('   （窗口内没有待办）');
