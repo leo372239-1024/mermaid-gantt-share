@@ -32,6 +32,12 @@ function check(cond, msg) {
 (async function main() {
   const opts = { headless: true, args: ['--no-sandbox'] };
   if (CHROME) opts.executablePath = CHROME;
+  /* 可选代理：对线上地址（GitHub Pages）跑本工具时，Chromium 默认不走系统代理，
+     会直接 ERR_CONNECTION_CLOSED。置 PLAYWRIGHT_PROXY=http://127.0.0.1:7897 即可。
+     本地 127.0.0.1 地址无需设置。 */
+  if (process.env.PLAYWRIGHT_PROXY) {
+    opts.proxy = { server: process.env.PLAYWRIGHT_PROXY };
+  }
   const browser = await pw.chromium.launch(opts);
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   /* 拦截剪贴板：通道 C 点「⏰ 同步系统闹钟」时会先把闹钟清单写进剪贴板，这里捕获它做断言
