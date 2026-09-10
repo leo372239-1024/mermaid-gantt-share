@@ -115,6 +115,20 @@
       sampleUrl: "",
       owners: owners([])
     },
+    b7: {
+      short: "文艺汇演领票",
+      who: "",
+      when: "",
+      where: "逸夫西801",
+      files: "",
+      steps: [],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      tipsImg: "",
+      sampleUrl: "",
+      owners: owners([])
+    },
     _roles: ROLES
   };
 });
