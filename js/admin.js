@@ -98,9 +98,58 @@
     return 'owners(' + JSON.stringify(names) + ')';
   }
 
-  function serializeEvents(eventsData) {
+  /* ---------- 从 events.js 源码里切出各条目的「原文块」 ----------
+     为什么需要（2026-09-10 真实事故）：写回是「整份覆盖」，本页的 events 若来自浏览器缓存的
+     旧 js/events.js，写回就会把远端新增的条目静默删掉 —— b7 的详情（连同 where「主校区西操场」）
+     就是这样被覆盖丢失的，且因为地点丢失，通道 C 闹钟标签的「地点」段也跟着没了。
+     这里按 serializeEvents 的固定缩进（条目 4 空格开头、块尾 `    },`）做**行级切片**：
+     只取原文，不 eval、不解析 JS 值，远端文件即便被手工改过也不会被执行。
+     返回 { key: '     key: {\n…\n    },' }（含末尾逗号，可直接回填正文）。 */
+  function blocksOf(src) {
+    var s = String(src == null ? '' : src);
+    /* 与 viewer.js 的 evKeysOf 用同一条正则，保证「判定为条目的行」与「能切出块的行」永远一致 */
+    var OPEN = /^ {4}([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*\{/gm;
+    var out = {}, m;
+    while ((m = OPEN.exec(s)) !== null) {
+      var close = s.indexOf('\n    },', OPEN.lastIndex);
+      if (close < 0) {
+        /* 宁可这次保存失败，也不能把文件截断成一个坏文件 */
+        throw new Error('events.js 结构异常：条目「' + m[1] + '」缺少结束行「    },」，已中止保存');
+      }
+      /* 统一换行：仓库里 events.js 是 LF；本地 Windows 检出可能是 CRLF。
+         保留块与其余正文拼在一起时必须同一种换行，否则整个文件会变成混合行尾。 */
+      out[m[1]] = s.slice(m.index, close + '\n    },'.length).replace(/\r\n/g, '\n');
+      OPEN.lastIndex = close + '\n    },'.length;
+    }
+    return out;
+  }
+
+  /* 计算「这一轮要按原文保留的远端条目」：远端有、本页没有、且不在显式删除名单里。
+     这是合并写回的唯一判据（纯函数，test/unit.js [13] 有断言）。
+     delIds 只由「删任务 / 取消勾选含详情」两处产生 —— 除用户明确表达删除之外，
+     任何「本页没有」都只当作「本页没加载到」，一律保留。 */
+  function keepBlocks(remoteSrc, localEvents, delIds) {
+    var local = Object.keys(localEvents || {}).filter(function (k) { return k !== '_roles'; });
+    var del = delIds || [];
+    var blocks = blocksOf(remoteSrc), keep = {};
+    Object.keys(blocks).forEach(function (k) {
+      if (local.indexOf(k) >= 0) return;
+      if (del.indexOf(k) >= 0) return;
+      keep[k] = blocks[k];
+    });
+    return keep;
+  }
+
+  /* keepRaw（可选）：本页没有、远端有的条目原文块 → 逐字保留，合并写回。
+     这是「保存不会丢数据」的护栏：页面过期只会「少写」，绝不会「删掉别人的东西」。 */
+  function serializeEvents(eventsData, keepRaw) {
     var roles = eventsData._roles || {};
-    var keys = Object.keys(eventsData).filter(function (k) { return k !== '_roles'; })
+    var keep = keepRaw || {};
+    var own = Object.keys(eventsData).filter(function (k) { return k !== '_roles'; });
+    var extra = Object.keys(keep).filter(function (k) {
+      return k !== '_roles' && own.indexOf(k) < 0 && typeof keep[k] === 'string' && keep[k];
+    });
+    var keys = own.concat(extra)
       .sort(function (a, b) { return a.localeCompare(b, 'zh', { numeric: true }); });
 
     var out = [];
@@ -135,6 +184,8 @@
     out.push('');
     out.push('  return {');
     keys.forEach(function (k) {
+      /* 远端保留块：原文逐字回填（不重建、不改写，连注释与字段顺序都保持原样） */
+      if (extra.indexOf(k) >= 0) { out.push(keep[k]); return; }
       var e = eventsData[k] || {};
       out.push('    ' + k + ': {');
       out.push('      short: ' + jsStr(e.short) + ',');
@@ -301,6 +352,8 @@
     REPO: REPO,
     serializeGantt: serializeGantt,
     serializeEvents: serializeEvents,
+    blocksOf: blocksOf,
+    keepBlocks: keepBlocks,
     taskLine: taskLine,
     fmt: fmt,
     parseDate: parseDate,

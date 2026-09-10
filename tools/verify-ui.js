@@ -14,7 +14,15 @@
  *   PLAYWRIGHT_CHROMIUM="C:/.../chrome.exe" node tools/verify-ui.js http://127.0.0.1:8899/
  */
 'use strict';
+const fs = require('fs');
 const path = require('path');
+const ROOT_ = path.join(__dirname, '..');
+const Parser = require(path.join(ROOT_, 'js', 'parser.js'));
+const Admin = require(path.join(ROOT_, 'js', 'admin.js'));
+const Events = require(path.join(ROOT_, 'js', 'events.js'));
+/* [11]「合并写回」用例需要两个版本：完整的远端文件 + 「缺某条」的过期页面脚本 */
+const eventsSrcFull = fs.readFileSync(path.join(ROOT_, 'js', 'events.js'), 'utf8');
+const ganttSrcFull = fs.readFileSync(path.join(ROOT_, 'gantt.md'), 'utf8');
 
 const URL_ = process.argv[2] || 'http://127.0.0.1:8899/';
 const CHROME = process.env.PLAYWRIGHT_CHROMIUM || '';
@@ -29,7 +37,43 @@ function check(cond, msg) {
   else { failures++; console.error('  ✗ ' + msg); }
 }
 
+/* ---------- 期望值从「站点实际提供的 gantt.md」推导 ----------
+   为什么不把时刻写死在断言里：2026-09-10 管理员在网页上把 b7 由 18:45 改成 18:35→18:45，
+   同一条「b7 落在 18:45」的断言在 test/unit.js 和本文件里接连假红两次 ——
+   被验证的规则（分钟级定位）没坏，是断言跟实时数据耦合了。
+   数据类断言一律「读数据 → 解析 → 推出期望值」，只有格式/行为类断言才用字面量。 */
+async function loadGanttModel() {
+  const res = await fetch(new URL('gantt.md', URL_).href, { cache: 'no-store' });
+  if (!res.ok) throw new Error('读取 gantt.md 失败：HTTP ' + res.status + '（' + URL_ + '）');
+  const md = await res.text();
+  const m = /```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(md);
+  return Parser.parse(m ? m[1] : md);
+}
+/* 与 js/viewer.js 的 fmtPt / rangeCN 同构（只用于推导期望值，不参与渲染） */
+function mdCN(d) { return (d.getMonth() + 1) + '.' + d.getDate(); }
+function fmtPtCN(d, hm) { return mdCN(d) + (hm ? ' ' + hm : ''); }
+function rangeCNOf(t) {
+  if (!t.start) return '';
+  const s = fmtPtCN(t.start, t.startTime || '');
+  const e = t.end ? fmtPtCN(t.end, t.endTime || '') : '';
+  if (!e || s === e) return s;
+  return s + ((t.startTime || t.endTime) ? ' 至 ' : '至') + e;
+}
+/* 'HH:mm' → 当日占比（用于事件条定位断言） */
+function fracOf(hm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || ''));
+  return m ? (+m[1] + (+m[2]) / 60) / 24 : null;
+}
+/* 未填时刻时页面的既定语义：时间点/里程碑取当日正中，时间段事件按 00:00 起算。
+   用 fallback 兜住「管理员把时刻清空了」的情况，避免又变成数据耦合的硬断言。 */
+function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fallback : f; }
+
 (async function main() {
+  /* 先从站点取回 gantt.md 解析出模型：后续所有「某条任务的时刻」都从它推出来，不写死 */
+  const gModel = await loadGanttModel();
+  const T = id => gModel.byId(id) || {};
+  const b7t = T('b7'), t25t = T('t25'), m12t = T('m12'), b3t = T('b3');
+
   const opts = { headless: true, args: ['--no-sandbox'] };
   if (CHROME) opts.executablePath = CHROME;
   /* 可选代理：对线上地址（GitHub Pages）跑本工具时，Chromium 默认不走系统代理，
@@ -130,8 +174,11 @@ function check(cond, msg) {
 
   console.log('[3] 标题时间精确到分钟');
   const caps = await page.$$eval('#gv-svg .gv-bar title', els => els.map(e => e.textContent));
-  check(caps.some(t => t.indexOf('9.10 14:00 至 9.10 17:00') >= 0), '文艺汇演领票标题含「9.10 14:00 至 9.10 17:00」');
-  check(caps.some(t => t.indexOf('9.10 18:45') >= 0), '交大人节标题含「9.10 18:45」');
+  check(caps.some(t => t.indexOf(rangeCNOf(t25t)) >= 0), '文艺汇演领票标题含「' + rangeCNOf(t25t) + '」');
+  check(caps.some(t => t.indexOf(rangeCNOf(b7t)) >= 0), '交大人节标题含「' + rangeCNOf(b7t) + '」');
+  /* 形态断言（与数据无关）：有起止时刻的条目必须长成「M.D HH:mm 至 M.D HH:mm」 */
+  check(caps.some(t => /\d{1,2}\.\d{1,2} \d{2}:\d{2} 至 \d{1,2}\.\d{1,2} \d{2}:\d{2}/.test(t)),
+    '标题里的分钟级起止形态正确（含 至 连接词）');
   const selLabels = await page.$$eval('#gv-lbox .gv-lname .dt', els => els.map(e => e.textContent.trim()));
   check(selLabels.some(t => t === '2026-09-10 14:00 → 2026-09-10 17:00'), '左侧列表显示分钟级起止');
 
@@ -226,15 +273,15 @@ function check(cond, msg) {
     });
     return { px: px, bars: out };
   });
-  check(!!bars && !!bars.bars.t25 && Math.abs(bars.bars.t25.frac - 14 / 24) < 0.01,
-    't25 起点落在当日 14:00（日内占比 ' + (bars && bars.bars.t25 && bars.bars.t25.frac.toFixed(3)) + ' ≈ 0.583）');
+  check(!!bars && !!bars.bars.t25 && Math.abs(bars.bars.t25.frac - fracOfOr(t25t.startTime, 0)) < 0.01,
+    't25 起点落在当日 ' + t25t.startTime + '（日内占比 ' + (bars && bars.bars.t25 && bars.bars.t25.frac.toFixed(3)) + ' ≈ ' + fracOfOr(t25t.startTime, 0).toFixed(3) + '）');
   const expW = bars ? Math.max(0.125 * bars.px, 3) : 0;
   check(!!bars && !!bars.bars.t25 && Math.abs(bars.bars.t25.w - expW) < 0.6,
     't25 长度 = 3 小时占比（期望 ' + expW.toFixed(1) + 'px，实际 ' + (bars && bars.bars.t25 && bars.bars.t25.w.toFixed(1)) + 'px）');
-  check(!!bars && !!bars.bars.m12 && Math.abs(bars.bars.m12.frac - 13 / 24) < 0.01,
-    'm12 里程碑落在当日 13:00（日内占比 ' + (bars && bars.bars.m12 && bars.bars.m12.frac.toFixed(3)) + ' ≈ 0.542）');
-  check(!!bars && !!bars.bars.b7 && Math.abs(bars.bars.b7.frac - 18.75 / 24) < 0.01,
-    'b7 落在当日 18:45（日内占比 ' + (bars && bars.bars.b7 && bars.bars.b7.frac.toFixed(3)) + ' ≈ 0.781）');
+  check(!!bars && !!bars.bars.m12 && Math.abs(bars.bars.m12.frac - fracOfOr(m12t.startTime, 0.5)) < 0.01,
+    'm12 里程碑落在当日 ' + m12t.startTime + '（日内占比 ' + (bars && bars.bars.m12 && bars.bars.m12.frac.toFixed(3)) + ' ≈ ' + fracOfOr(m12t.startTime, 0.5).toFixed(3) + '）');
+  check(!!bars && !!bars.bars.b7 && Math.abs(bars.bars.b7.frac - fracOfOr(b7t.startTime, 0.5)) < 0.01,
+    'b7 落在当日 ' + b7t.startTime + '（日内占比 ' + (bars && bars.bars.b7 && bars.bars.b7.frac.toFixed(3)) + ' ≈ ' + fracOfOr(b7t.startTime, 0.5).toFixed(3) + '）');
   check(!!bars && !!bars.bars.b3 && Math.abs(bars.bars.b3.frac - 0.5) < 0.02,
     '未填时刻的里程碑取当日正中（b3 日内占比 ' + (bars && bars.bars.b3 && bars.bars.b3.frac.toFixed(3)) + ' ≈ 0.5）');
 
@@ -407,7 +454,7 @@ function check(cond, msg) {
   check(!back.eDis && !back.tDis, '切回「事件」后结束日期/时刻恢复可填');
   await page.click('.gv-close');
 
-  /* 编辑「已存在」的时间点（b7 交大人节文艺晚会，18:45）：结束侧应在打开表单时就已禁用+清空。
+  /* 编辑「已存在」的时间点（b7 交大人节文艺晚会，时刻由管理员维护，期望值从 gantt.md 推导）：结束侧应在打开表单时就已禁用+清空。
      这条路径与新增表单不同 —— 初始 kind 直接就是 milestone，靠 renderForm 末尾的 syncKind() 兜住。 */
   await page.evaluate(() => {
     const row = Array.prototype.slice.call(document.querySelectorAll('.gv-lname'))
@@ -423,7 +470,7 @@ function check(cond, msg) {
     return { kind: k.value, sv: s.value, eDis: e.disabled, tDis: t.disabled, ev: e.value, tv: t.value };
   });
   check(eb.kind === 'milestone', '编辑既有时间点：类型回显为「时间点」（实际 ' + eb.kind + '）');
-  check(eb.sv === '18:45', '编辑既有时间点：开始时刻回显 18:45（实际「' + eb.sv + '」）');
+  check(eb.sv === b7t.startTime, '编辑既有时间点：开始时刻回显 ' + b7t.startTime + '（实际「' + eb.sv + '」）');
   check(eb.eDis && eb.tDis && eb.ev === '' && eb.tv === '',
     '编辑既有时间点：结束日期/时刻打开即禁用并清空（值「' + eb.ev + '」「' + eb.tv + '」）');
   await page.click('.gv-close');
@@ -447,7 +494,85 @@ function check(cond, msg) {
   await page.click('.gv-close');
   await page.evaluate(() => localStorage.removeItem('gantt_admin_token'));
 
-  console.log('[11] 截图存档');
+  console.log('[11] 合并写回：页面过期也不许删掉远端条目（回归 2026-09-10 b7 详情丢失事故）');
+  /* 事故复盘：管理员的标签页停在旧版 js/events.js（当时远端已有 b7、页面里没有），
+     点一次「保存更改」→ 整份写回 events.js → b7 的详情连同 where「主校区西操场」被删掉，
+     通道 C 闹钟标签的「地点」段随之消失。
+     这里把当时的现场原样搭出来（页面脚本给「缺 b7」的旧文件、GitHub API 给完整文件），
+     跑一次真实保存，断言写回内容里 b7 仍在 —— 护栏必须挡住这一类静默删数据。 */
+  {
+    const staleEvents = Admin.serializeEvents((function () {
+      const o = JSON.parse(JSON.stringify(Events));
+      delete o.b7;
+      return o;
+    })());
+    const p2 = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    p2.on('dialog', d => d.accept());
+    /* ① 页面脚本：给「缺 b7」的旧文件（等价于浏览器缓存了过期文件） */
+    await p2.route('**/js/events.js*', route => route.fulfill({
+      status: 200, contentType: 'application/javascript; charset=utf-8', body: staleEvents
+    }));
+    /* ② GitHub API 替身：GET 给完整文件（远端有 b7），PUT 记录下来并假装成功 */
+    const puts = [];
+    await p2.route('**/*api.github.com/**', route => {
+      const req = route.request(), url = req.url();
+      if (req.method() === 'PUT') {
+        puts.push({ url: url, body: JSON.parse(req.postData() || '{}') });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: { sha: 'new' }, commit: { sha: 'c1' } }) });
+      }
+      const isEvents = /events\.js/.test(decodeURIComponent(url));
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          content: Buffer.from(isEvents ? eventsSrcFull : ganttSrcFull, 'utf8').toString('base64'),
+          encoding: 'base64', sha: isEvents ? 'sha-ev' : 'sha-gantt'
+        })
+      });
+    });
+    await p2.addInitScript(() => { try { localStorage.setItem('gantt_admin_token', 'ui-test-only'); } catch (e) {} });
+    await p2.goto(URL_, { waitUntil: 'load' });
+    await p2.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
+    const scn = await p2.evaluate(() => ({ keys: Object.keys(window.BJTU_EVENTS || {}).join(','), b7: !!(window.BJTU_EVENTS && window.BJTU_EVENTS.b7) }));
+    check(scn.keys.length > 0 && !scn.b7,
+      '场景就位：旧 events.js 已生效（有 ' + scn.keys + '，无 b7）');
+    /* 随便改一条本来就有详情的任务（t25），触发一次真实的「暂存 → 保存」 */
+    await p2.evaluate(() => {
+      const row = Array.prototype.slice.call(document.querySelectorAll('.gv-lname'))
+        .filter(x => x.textContent.indexOf('收体检表') >= 0)[0];
+      if (row) row.click();
+    });
+    await p2.waitForSelector('.gv-editbtn', { timeout: 5000 });
+    await p2.click('.gv-editbtn');
+    await p2.waitForSelector('#gv-crudform', { timeout: 5000 });
+    await p2.click('#gv-crudsave');
+    await p2.waitForTimeout(400);
+    const staged = await p2.evaluate(() => {
+      const p = (function () { try { return JSON.parse(localStorage.getItem('gantt_pending') || 'null'); } catch (e) { return null; } })();
+      return { has: !!p, evCount: p && p.events ? Object.keys(p.events).length : -1 };
+    });
+    check(staged.has && staged.evCount > 0,
+      '改动已暂存，且 pending 里带着 events（' + staged.evCount + ' 条 —— 本页只认得这些，正是要考验的点）');
+    await p2.click('[data-act="save"]');
+    await p2.waitForTimeout(1000);
+    /* 页面检测到「本页较旧」时会在 1.5s 后自动刷新，提示条要赶在刷新前读 */
+    const toastTxt = await p2.evaluate(() => {
+      const t = document.querySelector('.gv-toast');
+      return t ? t.textContent : '';
+    });
+    await p2.waitForTimeout(1200);
+    const evPut = puts.filter(x => /events\.js/.test(decodeURIComponent(x.url)))[0];
+    check(!!evPut, '保存真的写回了 js/events.js（拦截到 PUT ' + puts.length + ' 次）');
+    const written = evPut ? Buffer.from(evPut.body.content || '', 'base64').toString('utf8') : '';
+    check(/^ {4}b7: \{/m.test(written), '写回内容里保留了 b7 条目（本页根本没加载它，靠合并写回带回）');
+    check(written.indexOf('主校区西操场') > 0, '保留的 b7 里带着 where「主校区西操场」——正是 9.10 丢掉的那一段');
+    check(/^ {4}b1: \{/m.test(written) && /^ {4}b6: \{/m.test(written), '其余条目照常写出（合并没有破坏正常内容）');
+    const gPut = puts.filter(x => /gantt\.md/.test(decodeURIComponent(x.url)))[0];
+    check(!!gPut, 'gantt.md 同样被写回（两条写操作都在）');
+    check(/保留远端新增的 ?b7/.test(toastTxt), '页面明确告知「已保留远端新增的 b7」（实际「' + toastTxt + '」）');
+    await p2.close();
+  }
+
+  console.log('[12] 截图存档');
   /* 预览图必须是「用户刚打开页面」的默认态，而不是测试操作后的残留态
      （前面点过缩放、点过任务、开过弹窗）。所以先整页重载再拍。 */
   await page.setViewportSize({ width: 1440, height: 1000 });

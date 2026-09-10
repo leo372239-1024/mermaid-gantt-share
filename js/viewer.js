@@ -23,6 +23,9 @@
  * 14) 通道 C（快捷指令 → 时钟 App 真闹钟）：**只对「今天开始」的条目**、每条只建 1 个闹钟，
  *     时间 = 开始时刻前 15 分钟，标签 = 「名称｜地点｜开始→结束时间」（口径与
  *     tools/build-deadlines.js 的 alarmAt/alarmLabel 必须同构）
+ * 15) 保存采用**合并写回**：写回 js/events.js 前先读远端原文，「远端有、本页没有、且不是本次
+ *     显式删除（pending.delIds）」的条目按原文逐字保留 —— 页面过期只会少写、绝不删数据；
+ *     gantt.md 因是整块替换，仍保留一道 id 级漂移体检（remote − local − delIds）。
  *
  * 用法：GanttViewer.mount(containerEl, ganttCode, eventsData)
  */
@@ -1944,6 +1947,14 @@
       if (partial.ganttCode !== undefined) cur.ganttCode = partial.ganttCode;
       if (partial.events !== undefined) cur.events = partial.events;
       if (partial.desc !== undefined) cur.desc = partial.desc;
+      /* delIds：本页**显式**删掉的 id（删任务 / 取消勾选「含详情」）。
+         只用累加、只增不减：合并写回要靠它区分「我确实要删」与「本页没加载到」，
+         万一某次误删了不该删的，宁可不删（保留）也不要错删。 */
+      if (partial.delIds !== undefined && partial.delIds.length) {
+        var merged = (cur.delIds || []).slice();
+        partial.delIds.forEach(function (id) { if (id && merged.indexOf(id) < 0) merged.push(id); });
+        cur.delIds = merged;
+      }
       /* v17：待上传示例图队列 */
       if (partial.sampleUploads !== undefined) cur.sampleUploads = partial.sampleUploads || [];
       /* v19：待上传步骤图队列 + 附件队列 */
@@ -2053,6 +2064,9 @@
     /* 实际执行保存（saveAll 的异步主体，方便 hydrate 后串联） */
     function doSaveAll(opts, pending, saveBtn, msg, hydrateFn) {
 
+      /* 本次写回时因「本页没有」而按原文保留的远端条目 id（合并写回的产物，仅用于事后告知） */
+      var mergedKeep = [];
+
       /* 先上传四类待传资源（每项仅传一次），返回 { sample:{id:url}, step:{id:url}, tips:{id:url}, att:[{id,name,url}] } */
       function uploadAll() {
         var sampleUps = (pending.sampleUploads || []).filter(function (u) { return u && u.id && u.dataUrl; });
@@ -2103,24 +2117,43 @@
         return attempt(3);
       }
 
+      /* 本页显式删掉的 id（doDelete / 取消勾选「含详情」时记账）。
+         只有被显式删掉的条目才允许从远端消失，其余一律视为「本页没加载到」而保留 ——
+         这条规则是「页面过期也只少写、不删数据」的关键。 */
+      function delIds() { return (pending.delIds || []).slice(); }
+      /* 从 gantt.md 全文取出第一段 ```mermaid 代码块 */
+      function mermaidOf(src) {
+        var m = /```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(String(src || ''));
+        return m ? m[1] : '';
+      }
+      function taskIdsOf(code) {
+        var mdl = code ? Parser.parse(code) : null;
+        return ((mdl && mdl.all) || []).map(function (t) { return t.id; }).filter(Boolean);
+      }
+
       /* 写回前体检（必须在任何写操作之前，避免「gantt.md 已写、events.js 中止」的半成品状态）：
-         远端有、本地没有的班务条目 = 本次整份写回会删除它们。可能是有意删除（编辑时取消勾选
-         「含详情」），也可能是本页 events 来自浏览器缓存的旧 js/events.js 或陈旧 pending。
-         两种情况外观一样，故交用户裁定；自动同步（silent）一律直接跳过，绝不静默删数据。 */
+         events.js 已改为**合并写回**（本页没有的远端条目按原文逐字保留），不会丢数据，故不再体检；
+         但 gantt.md 是「整块替换」，本页 model 若来自过期页面，写回会把远端新增的任务删掉。
+         判定：远端有、本页没有、且不是本次显式删除的 id。 */
       function precheckDrift() {
-        if (!pending.events) return Promise.resolve();
-        return Admin.getFile('js/events.js').then(function (f) {
-          var missing = evDriftKeys(f.content, pending.events);
+        if (!pending.ganttCode) return Promise.resolve();
+        return Admin.getFile('gantt.md').then(function (f) {
+          var local = taskIdsOf(pending.ganttCode);
+          var del = delIds();
+          var missing = taskIdsOf(mermaidOf(f.content)).filter(function (id) {
+            return local.indexOf(id) < 0 && del.indexOf(id) < 0;
+          });
           if (!missing.length) return;
           var list = missing.join('、');
           if (opts.silent) {
-            throw new Error('页面数据可能过期（远端多出 ' + list + '），已跳过本次自动同步以免误删');
+            throw new Error('页面数据可能过期（远端多出任务 ' + list + '），已跳过本次自动同步以免误删');
           }
           var ok = window.confirm(
-            '检测到远端存在、但本页数据里没有的条目：' + list + '\n\n' +
-            '继续保存会删除它们。\n\n' +
+            '检测到远端存在、但本页没有的任务：' + list + '\n\n' +
+            '继续保存会把它们从甘特图上删掉。\n' +
+            '（它们的执行说明不会丢 —— events.js 已改为合并写回，本页没加载到的条目会按原文保留）\n\n' +
             '· 确实要删除 → 点「确定」\n' +
-            '· 本页数据过期（浏览器用了缓存的旧 js/events.js）→ 点「取消」，' +
+            '· 本页数据过期（打开了很久的旧标签页）→ 点「取消」，' +
             '再按 Ctrl+F5（Mac：⌘+Shift+R）强制刷新后重试');
           if (!ok) throw new Error('已取消保存：页面数据可能过期，请先强制刷新（Ctrl+F5）再重试');
         });
@@ -2161,8 +2194,13 @@
           }));
         }
         if (effEvents) {
-          ops.push(writeFile('js/events.js', function () {
-            return Admin.serializeEvents(effEvents);
+          ops.push(writeFile('js/events.js', function (f) {
+            /* 合并写回：远端有、本页没有、且不是本次显式删除的条目 → 原文逐字保留。
+               页面过期只影响「本次写了多少」，绝不会「删掉什么」——
+               2026-09-10 b7 详情（含 where「主校区西操场」）被整份覆盖丢失，就是缺这道护栏。 */
+            var keep = Admin.keepBlocks(f.content, effEvents, delIds());
+            mergedKeep = Object.keys(keep).sort();
+            return Admin.serializeEvents(effEvents, keep);
           }));
         }
         return Promise.all(ops).then(function () {
@@ -2175,7 +2213,13 @@
            effEvents 为写回后的正式数据（含 sampleUrl 直链）；无 gantt 改动时沿用当前 model 渲染 */
         if (!opts.silent) {
           reloadAfterSave(pending.ganttCode || Admin.serializeGantt(model), effEvents || eventsData);
-          toast('✅ 已保存同步到 GitHub（含 deadlines.json 重建），全班刷新即见。');
+          if (mergedKeep.length) {
+            /* 本页数据比远端旧：已保留远端多出的条目，刷新一次把合并后的最新数据取回来，避免后续编辑基于旧数据 */
+            toast('ℹ️ 本页数据较旧：已保留远端新增的 ' + mergedKeep.join('、') + ' 条执行说明（未丢失），正在刷新…');
+            setTimeout(function () { location.reload(); }, 1500);
+          } else {
+            toast('✅ 已保存同步到 GitHub（含 deadlines.json 重建），全班刷新即见。');
+          }
         }
       }).catch(function (err) {
         if (saveBtn) saveBtn.disabled = false;
@@ -2569,15 +2613,20 @@
         window.__tipsImgDataUrl = null;
       }
 
-      var needEvents = false, newEvents = null;
+      var needEvents = false, newEvents = null, delIdsNow = [];
       if (isEvent) { needEvents = true; newEvents = buildEvents(id, newEvent); }
-      else if (!isNew && ev) { needEvents = true; newEvents = buildEvents(task.id, null); }
+      else if (!isNew && ev) {
+        /* 明确取消勾选「含详情」→ 这是一次**显式**删除，要记账，
+           否则合并写回会把远端那份详情原样保留回来，用户会以为「取消钩子没生效」 */
+        needEvents = true; newEvents = buildEvents(task.id, null); delIdsNow.push(task.id);
+      }
 
       var msg = (isNew ? 'add' : 'update') + ': ' + id + ' ' + name;
       /* v17：若用户本次选了新图片（本地 dataUrl）→ 记录到待上传队列（上传成功后写回 events 时替换为 raw 直链） */
       var pendingPartial = {
         ganttCode: Admin.serializeGantt(newModel),
         events: needEvents ? newEvents : undefined,
+        delIds: delIdsNow,
         desc: msg
       };
       var sampleUrlVal = newEvent ? newEvent.sampleUrl : null;
@@ -2640,10 +2689,12 @@
         })
       };
       var msg = 'delete: ' + task.id + ' ' + task.name;
-      /* 本地暂存删除（不立即请求 GitHub API），点工具栏「保存更改」后统一写回 */
+      /* 本地暂存删除（不立即请求 GitHub API），点工具栏「保存更改」后统一写回。
+         delIds 记账：只有在这里登记过的 id，合并写回时才允许从远端 events.js 消失 */
       savePending({
         ganttCode: Admin.serializeGantt(newModel),
         events: ev ? buildEvents(task.id, null) : undefined,
+        delIds: [task.id],
         desc: msg
       });
       /* 原地重渲染（不整页刷新，避免退出全屏） */

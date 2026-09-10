@@ -8,6 +8,8 @@
  *   3) 任务 id 全局唯一；events.js 中 b1..b9 与 gantt 任务 id 一一对应
  *   4) events.js 字段完整性（who/when/where/files/steps/owners 等）
  *   5) viewer.js 模块可正常加载并暴露 mount
+ *   6) 消息级口径回归：分钟级时间 / 通道 C 闹钟（名称｜地点｜起止）/ 编辑表单 / 合并写回护栏
+ *      （13 节 100 项；数据类断言一律从数据推导，不把某条任务的时刻写死）
  */
 'use strict';
 const fs = require('fs');
@@ -160,11 +162,16 @@ check(Ics.build([], {}).indexOf('BEGIN:VEVENT') < 0, '空事件列表不产生 V
 /* ---- 8. 分钟级时间口径（标题 / 左侧列表 / ddl 提醒共用同一套） ---- */
 console.log('[8] 分钟级时间口径');
 const t25 = model.byId('t25');     /* 文艺汇演领票 2026-09-10 14:00 → 17:00 */
-const b7 = model.byId('b7');       /* 交大人节文艺晚会 18:45（起止同刻） */
+const b7 = model.byId('b7');       /* 交大人节文艺晚会（具体时刻由管理员在网页上维护，断言不写死） */
 const b3 = model.byId('b3');       /* 校外住宿登记承诺书 2026-09-13 单日点（无时刻） */
 check(Viewer.rangeCN(t25) === '9.10 14:00 至 9.10 17:00', '标题时间精确到分钟（实际「' + Viewer.rangeCN(t25) + '」）');
 check(Viewer.captionOf(t25) === '文艺汇演领票（9.10 14:00 至 9.10 17:00）', '完整标题形如「名称（起 至 止）」（实际「' + Viewer.captionOf(t25) + '」）');
-check(Viewer.rangeCN(b7) === '9.10 18:45', '起止同刻只显示一次（实际「' + Viewer.rangeCN(b7) + '」）');
+/* 「起止同刻只显示一次」用**构造数据**来测：原来钉死在 b7 上，
+   管理员把 18:45 改成 18:35→18:45 就假红了一次（规则本身没坏，是断言耦合了实时数据） */
+const samePt = { start: new Date(2026, 8, 10, 18, 45), end: new Date(2026, 8, 10, 18, 45), startTime: '18:45', endTime: '18:45' };
+check(Viewer.rangeCN(samePt) === '9.10 18:45', '起止同刻只显示一次（实际「' + Viewer.rangeCN(samePt) + '」）');
+check(/^\d{1,2}\.\d{1,2} \d{2}:\d{2}( 至 \d{1,2}\.\d{1,2} \d{2}:\d{2})?$/.test(Viewer.rangeCN(b7)),
+  'b7 标题时间形如「9.10 18:45」或「9.10 18:35 至 9.10 18:45」（实际「' + Viewer.rangeCN(b7) + '」）');
 check(Viewer.rangeCN(b3) === '9.13', '未填时刻的条目保持纯日期（实际「' + Viewer.rangeCN(b3) + '」）');
 check(Viewer.hmOf('9:5') === '09:05' && Viewer.hmOf('') === '', '时刻归一：9:5→09:05，空值→空');
 
@@ -234,10 +241,24 @@ check(!!c25 && Date.parse(c25.alarmAt) === Date.parse(c25.startAt) - 15 * 60000,
 check(!!c25 && c25.alarmLabel === '文艺汇演领票｜9.10 14:00 → 9.10 17:00',
   'alarmLabel =「名称｜起止日期时间」（t25 无地点，实际「' + (c25 && c25.alarmLabel) + '」）');
 const cB7 = dj.items.filter(i => i.id === 'b7')[0];
-check(!!cB7 && cB7.alarmLabel === '交大人节”文艺晚会｜主校区西操场｜9.10 18:45',
-  '标签含地点，且起止同刻只显示一次时间（实际「' + (cB7 && cB7.alarmLabel) + '」）');
+/* 期望值从「条目自身 + events 数据」推出来，不把时刻写死在断言里（管理员改时间不该导致假红） */
+const expB7 = [Events.b7.short, Events.b7.where, Viewer.alarmWhenOf(model.byId('b7'))].filter(Boolean).join('｜');
+check(!!cB7 && cB7.alarmLabel === expB7,
+  '标签 = 名称｜地点｜起止（实际「' + (cB7 && cB7.alarmLabel) + '」）');
+const sameAlarm = { start: new Date(2026, 8, 11), end: new Date(2026, 8, 11), startTime: '18:45', endTime: '18:45' };
+check(Viewer.alarmWhenOf(sameAlarm) === '9.11 18:45',
+  'alarmWhenOf：起止同刻只显示一次时间（实际「' + Viewer.alarmWhenOf(sameAlarm) + '」）');
 check(dj.items.filter(i => i.where).every(i => i.alarmLabel.indexOf('｜' + i.where + '｜') > 0),
   '凡有地点的条目，标签中必含「｜地点｜」段（' + dj.items.filter(i => i.where).length + ' 条有地点）');
+/* 非空断言：上面那条「凡有地点…」在一条地点都没有时会**空过**，等于没测。
+   2026-09-10 正是「b7 详情被整份写回覆盖 → where 变空 → 标签静默少一段」，
+   所以这里额外钉住「确实有带地点的条目」且「b7 的地点出现在标签里」。 */
+const withWhere = dj.items.filter(i => i.where);
+check(withWhere.length > 0, '数据里确实存在带地点的条目（' + withWhere.length + ' 条：' + withWhere.map(i => i.id).join(',') + '）');
+const b7rec = dj.items.filter(i => i.id === 'b7')[0];
+check(!!b7rec && b7rec.where === '主校区西操场', 'b7 的地点未被丢失（where = ' + (b7rec && JSON.stringify(b7rec.where)) + '）');
+check(!!b7rec && b7rec.alarmLabel.indexOf('主校区西操场') > 0,
+  'b7 的闹钟标签含地点段（实际「' + (b7rec && b7rec.alarmLabel) + '」）');
 const cM12 = dj.items.filter(i => i.id === 'm12')[0];
 check(!!cM12 && cM12.alarmTime === '12:45', '时间点同理：m12 13:00 → 闹钟 ' + (cM12 && cM12.alarmTime));
 check(dj.items.every(i => i.alarmLabel.indexOf(i.name + '｜') === 0), 'alarmLabel 以「名称｜」开头');
@@ -310,6 +331,36 @@ const kindOptions = (viewerSrc.match(/<option value="(normal|milestone|crit)"[^>
   .filter(s => /name="kind"|<option value="(normal|milestone|crit)"/.test(s) && /事件|时间点|关键节点/.test(s));
 check(kindOptions.length === 2 && !/value="crit"/.test(viewerSrc.slice(viewerSrc.indexOf('name="kind"'), viewerSrc.indexOf('name="kind"') + 900)),
   '类型下拉只有「事件 / 时间点」两项（实测 ' + kindOptions.length + ' 项；无 crit 选项）');
+
+/* ---- 13. 合并写回（保存不再有机会删掉远端条目） ---- */
+console.log('[13] 合并写回护栏（整份覆盖 → 合并）');
+/* 事故复现：远端有 b7、本页没有（浏览器用了缓存的旧 events.js）→ 合并后必须逐字保留 */
+const blocks = Admin.blocksOf(realSrc);
+check(Object.keys(blocks).sort().join(',') === 'b1,b2,b3,b4,b5,b6,b7',
+  'blocksOf 切出全部条目的原文块（' + Object.keys(blocks).join(',') + '）');
+check(blocks.b7.split('\n')[0].trim() === 'b7: {', '块首是条目行（' + blocks.b7.split('\n')[0].trim() + '）');
+check(blocks.b7.split('\n').pop().trim() === '},', '块尾是结束行「},」，切分边界正确');
+check(blocks.b7.indexOf('主校区西操场') > 0, 'b7 的原文块里带着地点');
+const kept = Admin.keepBlocks(realSrc, stale, []);
+check(Object.keys(kept).join(',') === 'b7', '本页缺 b7 → 被判为「要保留」（' + Object.keys(kept).join(',') + '）');
+check(Admin.keepBlocks(realSrc, stale, ['b7']) && Object.keys(Admin.keepBlocks(realSrc, stale, ['b7'])).length === 0,
+  '显式删除名单里有 b7 → 不再保留（删除功能仍然有效，不会被合并写回"复活"）');
+check(Object.keys(Admin.keepBlocks(realSrc, Events, [])).length === 0, '本地齐全 → 无保留项（不会重复写入）');
+const mergedSrc = Admin.serializeEvents(stale, kept);
+fs.writeFileSync(path.join(ROOT, '.probe-merged.js'), mergedSrc, 'utf8');
+let merged = null;
+try { merged = require(path.join(ROOT, '.probe-merged.js')); } finally { fs.unlinkSync(path.join(ROOT, '.probe-merged.js')); }
+check(!!merged && !!merged.b7 && merged.b7.where === '主校区西操场',
+  '合并产物可被正常加载，且 b7 地点完好（where = ' + (merged && merged.b7 && JSON.stringify(merged.b7.where)) + '）');
+check(!!merged && Object.keys(merged).length === Object.keys(Events).length,
+  '合并后条目数与原来一致（' + (merged && Object.keys(merged).length) + ' vs ' + Object.keys(Events).length + '）');
+/* 不传 keep 时 b7 确实会消失 —— 说明护栏不是"恰好什么都没做"，而是真的在起作用 */
+check(!/b7:/.test(Admin.serializeEvents(stale)),
+  '对照：不传保留块时 b7 会被删掉（证明这条护栏有实际作用，不是空转）');
+/* 文件被手工改坏（条目块没有结束行）→ 必须报错中止，绝不能写出半个文件 */
+let threw = '';
+try { Admin.blocksOf('  return {\n    b7: {\n      short: "x"\n'); } catch (e) { threw = e.message; }
+check(/缺少结束行/.test(threw), '结构异常时报错中止保存（' + threw + '）');
 
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

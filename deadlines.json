@@ -1,6 +1,6 @@
 {
   "schema": 4,
-  "generatedAt": "2026-09-10T13:59:51.034Z",
+  "generatedAt": "2026-09-10T14:08:47.333Z",
   "timezone": "Asia/Shanghai",
   "windowDays": 30,
   "icsWindowDays": 180,
@@ -90,7 +90,7 @@
       "alarmLead": 15,
       "alarmAt": "2026-09-10T10:20:00.000Z",
       "alarmTime": "18:20",
-      "alarmLabel": "交大人节”文艺晚会｜9.10 18:35 → 9.10 18:45",
+      "alarmLabel": "交大人节”文艺晚会｜主校区西操场｜9.10 18:35 → 9.10 18:45",
       "alarmExact": true,
       "daysLeft": 0,
       "hoursLeft": -3,
@@ -98,7 +98,7 @@
       "kind": "milestone",
       "crit": false,
       "owner": "",
-      "where": "",
+      "where": "主校区西操场",
       "alert": "今天 18:45 截止 · 交大人节”文艺晚会",
       "detail": "今天 18:45 截止"
     }
@@ -243,7 +243,7 @@
       "alarmLead": 15,
       "alarmAt": "2026-09-10T10:20:00.000Z",
       "alarmTime": "18:20",
-      "alarmLabel": "交大人节”文艺晚会｜9.10 18:35 → 9.10 18:45",
+      "alarmLabel": "交大人节”文艺晚会｜主校区西操场｜9.10 18:35 → 9.10 18:45",
       "alarmExact": true,
       "daysLeft": 0,
       "hoursLeft": -3,
@@ -251,7 +251,7 @@
       "kind": "milestone",
       "crit": false,
       "owner": "",
-      "where": "",
+      "where": "主校区西操场",
       "alert": "今天 18:45 截止 · 交大人节”文艺晚会",
       "detail": "今天 18:45 截止"
     },
