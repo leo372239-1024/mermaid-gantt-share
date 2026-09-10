@@ -611,32 +611,33 @@
       var fracNow = (n.getHours() * 60 + n.getMinutes()) / 1440;
       return [xOfDayFrac(n, fracNow, px), xOfDayFrac(n, 1, px)];
     }
-    /* 两条红线的 SVG 片段（px/totalH 由调用方传入；单列成函数是为了让①线能被定时刷新，无需整图重绘） */
-    function nowLinesSVG(px, totalH, worldW, monthLabelXs) {
+    /* 两条红线的 SVG 片段（px/totalH 由调用方传入；单列成函数是为了让①线能被定时刷新，无需整图重绘）
+       标注位置约定（避免与月份标签行互相错位）：
+         · 「现在 HH:mm」文字置于线的【左侧】（左侧越界时自动翻到右侧）
+         · 「今日 24:00」文字置于线的【右侧】（右侧越界时自动翻到左侧）
+       两条标签共用同一条基线 y = AXIS_H-18（月份标签在 y = AXIS_H-7，错开一整行，互不撞字）。 */
+    function nowLinesSVG(px, totalH, worldW) {
       if (!hasTodayInRange) return '';
       var xs = redLineXs(px);
       var n = new Date();
       var nowHM = pad(n.getHours()) + ':' + pad(n.getMinutes());
+      var labY = (AXIS_H - 18).toFixed(1);
       var out = '';
-      /* ① 当前时刻：实线 + 顶行标签（顶行 y=AXIS_H-18 与月份标签(y=AXIS_H-7)错开一行，避免撞字） */
+      /* ① 当前时刻：实线 + 标签在左 */
       out += '<line x1="' + xs[0].toFixed(1) + '" y1="' + AXIS_H + '" x2="' + xs[0].toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="2.2" opacity=".95"/>';
       if (xs[0] >= LEFT_PAD && xs[0] <= worldW - RIGHT_PAD) {
         var labNow = '现在 ' + nowHM;
-        var fitsRight = (xs[0] + 6 + estW(labNow, 10.5)) <= (worldW - RIGHT_PAD + 6);
-        out += '<text x="' + (fitsRight ? xs[0] + 6 : xs[0] - 6).toFixed(1) + '" y="' + (AXIS_H - 18) +
-          '" text-anchor="' + (fitsRight ? 'start' : 'end') + '" font-size="10.5" font-weight="700" fill="#ef4444">' + labNow + '</text>';
+        var leftOk = (xs[0] - 6 - estW(labNow, 10.5)) >= 2;   /* 左侧放得下就放左边（默认） */
+        out += '<text x="' + (leftOk ? xs[0] - 6 : xs[0] + 6).toFixed(1) + '" y="' + labY +
+          '" text-anchor="' + (leftOk ? 'end' : 'start') + '" font-size="10.5" font-weight="700" fill="#ef4444">' + labNow + '</text>';
       }
-      /* ② 今日 24:00：虚线 + 与月份标签同行的右对齐标签（月份标签占位时省略文字，只留线） */
+      /* ② 今日 24:00：虚线 + 标签在右 */
       out += '<line x1="' + xs[1].toFixed(1) + '" y1="' + AXIS_H + '" x2="' + xs[1].toFixed(1) + '" y2="' + totalH + '" stroke="#ef4444" stroke-width="1.6" stroke-dasharray="5 4" opacity=".8"/>';
-      var labEod = '今日 24:00';
       if (xs[1] >= LEFT_PAD && xs[1] <= worldW - RIGHT_PAD) {
-        var nearMonth = false;
-        for (var mi2 = 0; mi2 < monthLabelXs.length; mi2++) {
-          if (Math.abs(xs[1] - monthLabelXs[mi2]) < 74) { nearMonth = true; break; }
-        }
-        if (!nearMonth) {
-          out += '<text x="' + (xs[1] - 5).toFixed(1) + '" y="' + (AXIS_H - 7) + '" text-anchor="end" font-size="10.5" font-weight="700" fill="#ef4444">' + labEod + '</text>';
-        }
+        var labEod = '今日 24:00';
+        var rightOk = (xs[1] + 6 + estW(labEod, 10.5)) <= (worldW - RIGHT_PAD + 4);  /* 右侧放得下就放右边（默认） */
+        out += '<text x="' + (rightOk ? xs[1] + 6 : xs[1] - 6).toFixed(1) + '" y="' + labY +
+          '" text-anchor="' + (rightOk ? 'start' : 'end') + '" font-size="10.5" font-weight="700" fill="#ef4444">' + labEod + '</text>';
       }
       return out;
     }
@@ -655,7 +656,7 @@
         var px = pxPerDay();
         var wW = parseFloat(svgEl.getAttribute('width')) || 0;
         var tH = parseFloat(svgEl.getAttribute('height')) || 0;
-        g.innerHTML = nowLinesSVG(px, tH, wW, curMonthLabelXs);
+        g.innerHTML = nowLinesSVG(px, tH, wW);
       }
       /* ② 提醒角标依赖「剩余时长」，跨分钟后可能变化 */
       try { remUpdateBadge(); } catch (e) {}
@@ -677,6 +678,20 @@
 
       function xOf(d) { return LEFT_PAD + diffDays(minDate, d) * px; }
       function yOfTrack(k) { return AXIS_H + k * rowH; }
+      /* ---- 分钟级定位（与提醒口径 / deadlines.json 完全一致，改一处必须同步另一处）----
+         开始：开始日期 + 开始时刻（未填时刻 → 当日 00:00）
+         截止：结束日期 + 结束时刻（未填 → 当日 23:59；起止同日且只填了开始时刻 → 用开始时刻）
+         于是「3 小时的会议」就是 1/8 天宽的条，不再一律占满整日。 */
+      function fracOfHM(hm) { return (hm.h * 60 + hm.mi) / 1440; }
+      function xOfSpanStart(t) { return xOfDayFrac(t.start, fracOfHM(remStartHM(t)), px); }
+      function xOfSpanEnd(t) { return xOfDayFrac(t.end || t.start, fracOfHM(remDueHM(t)), px); }
+      /* 时间点/里程碑（零长度区间）：填了时刻 → 精确落在该分钟；未填 → 取当日正中。
+         为什么未填取正中而不是日界：零长度标记压在斑马纹的日界线上会让人分不清属于哪一天。 */
+      function xOfPoint(t) {
+        var s = remHM(t.startTime, 0, 0);
+        var hm = s.exact ? s : remHM(t.endTime, 0, 0);   /* 只看时刻本身，不做 23:59 兜底 */
+        return xOfDayFrac(t.start, hm.exact ? fracOfHM(hm) : 0.5, px);
+      }
 
       var S = '';
       /* 近期事件高亮渐变 + 今日竖线渐变（红色 #ef4444 → #dc2626），用于「开始日在今天±3天内且未结束」的事件/节点与今日线
@@ -689,6 +704,17 @@
         '<stop offset="0" stop-color="#ef4444"/><stop offset="1" stop-color="#dc2626"/>' +
         '</linearGradient>' +
         '</defs>';
+
+      /* 逐日交替底色（浅蓝 #e8f2fd / 留白）：先铺底，再压网格与事件条，用于一眼区分相邻日期。
+         阈值 px>=4：再窄时单日不足 4px，条纹会退化成摩尔纹噪声，此时靠月份网格定位即可。 */
+      if (px >= 4) {
+        S += '<g id="gv-zebra">';
+        for (var zi = 1; zi < totalDays; zi += 2) {
+          S += '<rect x="' + (LEFT_PAD + zi * px).toFixed(1) + '" y="' + AXIS_H +
+            '" width="' + px.toFixed(1) + '" height="' + (totalH - AXIS_H).toFixed(1) + '" fill="#e8f2fd"/>';
+        }
+        S += '</g>';
+      }
 
       /* 月份网格 + 轴标签 */
       S += '<g>';
@@ -709,27 +735,21 @@
           lastLabelX = xm;
         }
       }
-      /* 天刻度：逐日细网格 + 【每一天】数字刻度（px 足够时全部显示，随缩放自动取舍；避开月份/红线文字） */
+      /* 天刻度：【每一天】的日期数字放在该日区间的正中（原来贴在日界线上，视觉上分不清属于哪一天；
+         日界线本身已由逐日交替底色表达，不再画冗余细网格） */
       var redXs = redLineXs(px);
-      if (px >= 6) {
-        for (var di = 0; di <= totalDays; di++) {
-          var ddx = LEFT_PAD + di * px;
-          S += '<line x1="' + ddx.toFixed(1) + '" y1="' + AXIS_H + '" x2="' + ddx.toFixed(1) + '" y2="' + totalH + '" stroke="#f6f8fb" stroke-width="1"/>';
-        }
-        if (px >= 10.5) {
-          /* 每一天都显示日期数字（不再只显示奇数天） */
-          for (var dj = 0; dj <= totalDays; dj++) {
-            var ddt = addDays(minDate, dj);
-            var ddx2 = LEFT_PAD + dj * px;
-            var tooNear = false;
-            for (var ri = 0; !tooNear && ri < redXs.length; ri++) { if (Math.abs(ddx2 - redXs[ri]) < 12) tooNear = true; }
-            for (var mi = 0; !tooNear && mi < monthLabelXs.length; mi++) {
-              if (Math.abs(ddx2 - monthLabelXs[mi]) < 10) tooNear = true;
-            }
-            if (tooNear) continue;
-            if (ddx2 < LEFT_PAD + 7 || ddx2 > worldW - RIGHT_PAD - 4) continue;
-            S += '<text x="' + ddx2.toFixed(1) + '" y="' + (AXIS_H + 2) + '" text-anchor="middle" font-size="8.5" fill="#9fb0c3">' + ddt.getDate() + '</text>';
+      if (px >= 10.5) {
+        for (var dj = 0; dj < totalDays; dj++) {
+          var ddt = addDays(minDate, dj);
+          var ddx2 = LEFT_PAD + (dj + 0.5) * px;          /* 日中心 */
+          var tooNear = false;
+          for (var ri = 0; !tooNear && ri < redXs.length; ri++) { if (Math.abs(ddx2 - redXs[ri]) < 12) tooNear = true; }
+          for (var mi = 0; !tooNear && mi < monthLabelXs.length; mi++) {
+            if (Math.abs(ddx2 - monthLabelXs[mi]) < 12) tooNear = true;
           }
+          if (tooNear) continue;
+          if (ddx2 < LEFT_PAD + 7 || ddx2 > worldW - RIGHT_PAD - 4) continue;
+          S += '<text x="' + ddx2.toFixed(1) + '" y="' + (AXIS_H + 2) + '" text-anchor="middle" font-size="8.5" fill="#7e93a6">' + ddt.getDate() + '</text>';
         }
       }
       curMonthLabelXs = monthLabelXs;
@@ -742,7 +762,7 @@
 
       /* 今日两条红线（纯红 #ef4444；SVG 渐变在零宽竖线上会失效，故用纯色）：
          ① 当前时刻（分钟级，独立 #gv-nowlines 组，可被 tickNowLine 单独刷新） ② 今日 24:00 */
-      S += '<g id="gv-nowlines">' + nowLinesSVG(px, totalH, worldW, monthLabelXs) + '</g>';
+      S += '<g id="gv-nowlines">' + nowLinesSVG(px, totalH, worldW) + '</g>';
 
       /* ================= 绘制事件（两遍：先画条收集占用矩形，再放里程碑与防重叠标注） ================= */
       var barRects = [];    // 已画元素占用 {x1,y1,x2,y2}
@@ -766,8 +786,9 @@
       /* ---- 第一遍：普通时间条 ---- */
       tasksAll.forEach(function (t) {
         if (t.point || t.milestone) return;
-        var x1 = xOf(t.start), x2 = xOf(t.end);
-        var w = Math.max(x2 - x1 + px, 3);
+        /* 起止按「日期 + 分钟级时刻」比例定位与定长：3 小时的事件就是 1/8 天宽（最小 3px 保可点） */
+        var x1 = xOfSpanStart(t), x2 = xOfSpanEnd(t);
+        var w = Math.max(x2 - x1, 3);
         var st = statusOf(t, today);
         var k = layout.trackOf[t.id];
         var cy = yOfTrack(k) + rowH / 2;
@@ -919,7 +940,7 @@
 
       /* ---- 第二遍：里程碑/当日点（菱形+旁标）与过窄条外置名称标注 ---- */
       tasksAll.forEach(function (t) {
-        var x1 = xOf(t.start), x2 = xOf(t.end);
+        var x1 = xOfPoint(t);   /* 分钟级定位：填了时刻落该分钟；未填取当日正中 */
         var k = layout.trackOf[t.id];
         var cy = yOfTrack(k) + rowH / 2;
         var id = esc(t.id || '');
