@@ -358,6 +358,20 @@
     }
     return w;
   }
+  /* events.js 顶层的班务 key 提取。不 eval 远端代码，只按 serializeEvents 的固定缩进（4 空格）扫。
+     为什么要这个：保存是「整份写回」，本页的 events 若来自浏览器缓存的旧 js/events.js（或陈旧 pending），
+     写回就会把远端新增的条目静默删掉 —— 2026-09-10 实际发生过一次（b7 的详情被覆盖丢失）。 */
+  function evKeysOf(src) {
+    var out = [], re = /^ {4}([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*\{/gm, m;
+    while ((m = re.exec(String(src || ''))) !== null) { if (m[1] !== '_roles') out.push(m[1]); }
+    return out;
+  }
+  /* 「远端有、本地没有」的 key —— 即本次整份写回会删除掉的条目 */
+  function evDriftKeys(remoteSrc, localEvents) {
+    if (!localEvents) return [];
+    var local = Object.keys(localEvents).filter(function (k) { return k !== '_roles'; });
+    return evKeysOf(remoteSrc).filter(function (k) { return local.indexOf(k) < 0; });
+  }
   /* 条/节点内标注重排：优先保留括号日期注记，只截断头部名称（防文字重叠遮盖）。
      注：超长注记（如「新生体检(9.5至9.7工作时间,交体检表至9.7)」）整体优先采用，
      实在放不下再降级为纯日期「(9.5至9.7)」，仍放不下才返回空（由调用方外置） */
@@ -1970,7 +1984,30 @@
         return attempt(3);
       }
 
-      return uploadAll().then(function (res) {
+      /* 写回前体检（必须在任何写操作之前，避免「gantt.md 已写、events.js 中止」的半成品状态）：
+         远端有、本地没有的班务条目 = 本次整份写回会删除它们。可能是有意删除（编辑时取消勾选
+         「含详情」），也可能是本页 events 来自浏览器缓存的旧 js/events.js 或陈旧 pending。
+         两种情况外观一样，故交用户裁定；自动同步（silent）一律直接跳过，绝不静默删数据。 */
+      function precheckDrift() {
+        if (!pending.events) return Promise.resolve();
+        return Admin.getFile('js/events.js').then(function (f) {
+          var missing = evDriftKeys(f.content, pending.events);
+          if (!missing.length) return;
+          var list = missing.join('、');
+          if (opts.silent) {
+            throw new Error('页面数据可能过期（远端多出 ' + list + '），已跳过本次自动同步以免误删');
+          }
+          var ok = window.confirm(
+            '检测到远端存在、但本页数据里没有的条目：' + list + '\n\n' +
+            '继续保存会删除它们。\n\n' +
+            '· 确实要删除 → 点「确定」\n' +
+            '· 本页数据过期（浏览器用了缓存的旧 js/events.js）→ 点「取消」，' +
+            '再按 Ctrl+F5（Mac：⌘+Shift+R）强制刷新后重试');
+          if (!ok) throw new Error('已取消保存：页面数据可能过期，请先强制刷新（Ctrl+F5）再重试');
+        });
+      }
+
+      return precheckDrift().then(function () { return uploadAll(); }).then(function (res) {
         var ops = [];
         var effEvents = pending.events;
         if (res && effEvents) {
@@ -2494,5 +2531,5 @@
   }
 
   /* 纯函数导出：给 test/unit.js 做回归断言用（不参与页面渲染） */
-  return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption };
+  return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption, evKeysOf: evKeysOf, evDriftKeys: evDriftKeys };
 });

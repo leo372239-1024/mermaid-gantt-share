@@ -188,5 +188,21 @@ if (fs.existsSync(icsPath)) {
   check((icsTxt.match(/BEGIN:VALARM/g) || []).length === nEv * 2, '每条事件恰好 2 个 VALARM');
 }
 
+/* ---- 10. 防误删闸门（过期快照体检） ---- */
+console.log('[10] 保存前的「过期快照」体检');
+/* 用真实 events.js 源码当作"远端"内容，用序列化产物当作"本地"内容 → 无漂移 */
+const realSrc = fs.readFileSync(path.join(ROOT, 'js', 'events.js'), 'utf8');
+const keysAll = Viewer.evKeysOf(realSrc);
+check(keysAll.length >= 5 && keysAll.indexOf('b7') >= 0, '从 events.js 源码提取到顶层班务 key（' + keysAll.join(',') + '）');
+check(keysAll.indexOf('_roles') < 0, '提取时排除 _roles（它不是班务条目）');
+check(keysAll.indexOf('short') < 0 && keysAll.indexOf('who') < 0, '不受缩进 6 空格的嵌套字段干扰');
+check(Viewer.evDriftKeys(realSrc, Events).length === 0, '本地与远端一致时漂移为空（不会误弹确认框）');
+/* 模拟"本页 events 来自缓存的旧文件"：删掉 b7 → 必须被识别为「会被误删的条目」 */
+const stale = JSON.parse(JSON.stringify(Events));
+delete stale.b7;
+check(Viewer.evDriftKeys(realSrc, stale).join(',') === 'b7', '本地缺 b7 时能识别出漂移 b7（本次真实事故场景）');
+check(Viewer.evDriftKeys('', Events).length === 0, '远端内容为空时不误报');
+check(Viewer.evDriftKeys(realSrc, null).length === 0, '无本地 events 时不误报');
+
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);
