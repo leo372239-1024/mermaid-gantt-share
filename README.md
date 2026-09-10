@@ -20,6 +20,9 @@
 | `vendor/mermaid.min.js` | 自托管渲染引擎 v11.17.2（仅 `editor.html` 本地编辑器使用） |
 | `editor.html` | 本地即时预览编辑器（双击打开，左侧改代码右侧实时出图） |
 | `test/unit.js` | Node 单测：解析器 + 数据完整性冒烟（`node test/unit.js`） |
+| `tools/build-deadlines.js` | ⭐ 把 `gantt.md` 编译成 `deadlines.json`（供手机通知系统消费，`node tools/build-deadlines.js`） |
+| `deadlines.json` | **自动生成，勿手改**：拍平后的待办清单，iPhone 快捷指令直接读取 |
+| `docs/ios-reminder-setup.md` | iPhone 强提醒配置指南（快捷指令 + 定时自动化，零服务器） |
 
 **今日线原理**：渲染时按浏览器当前日期画红色竖线（`new Date()` 取本地日期，无服务器、无定时任务）。
 
@@ -103,3 +106,27 @@ gantt
 - **手机上图太宽？** 页面支持横向滑动/双指拖动；已关闭自动压缩，保证文字清晰。
 - **私密性？** 页面为公开 URL。若需仅班内可见，可在渲染页前加一道口令页（需要时再找我加）。
 - **EdgeOne 免费额度？** 官方长期免费套餐：静态流量/请求不限量，每月有定额构建次数（改一次代码消耗一次，日常更新绰绰有余）。
+
+## 七、iPhone 强提醒（可选，零服务器）
+
+页面里的「🔔 提醒」只在打开网页时可见。若要让临近截止的待办**主动**提醒你，且强度要达到
+「突破静音与专注模式、像闹钟一样响」，用 iOS 自带的快捷指令即可，不需要服务器、不需要装 App。
+
+**为什么不直接发推送**：iOS 的通知分五档，最强的「系统级闹钟」需要原生 App 的 AlarmKit 框架，
+「关键警报」需要 Apple 单独审批的 entitlement（个人开发者基本拿不到）。**网页两条路都走不通**，
+但快捷指令可以直接调用系统计时器，从而拿到同级强度。
+
+**数据流**：
+
+```
+gantt.md ──(GitHub Actions 自动编译)──▶ deadlines.json ──▶ iPhone 快捷指令 ──▶ 系统级响铃
+```
+
+- 本地编译：`node tools/build-deadlines.js`（时区按北京时间处理，阈值可用环境变量 `DEADLINE_WINDOW_DAYS` 调整）
+- 自动编译：`.github/workflows/update-deadlines.yml`，在 `gantt.md` 变更时以及每天 06:00 / 18:00 各跑一次
+- 线上地址：`https://leo372239-1024.github.io/mermaid-gantt-share/deadlines.json`
+
+完整的手把手配置步骤见 **[`docs/ios-reminder-setup.md`](docs/ios-reminder-setup.md)**。
+
+> 提示：快捷指令无法远程分发给同学，每个人需要各自配置一次。如果班级要统一推送，
+> 替代方案是 GitHub Actions + Bark（关键警报级推送），但需要每人安装 App 并提交 device key。
