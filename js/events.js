@@ -129,10 +129,20 @@
       sampleUrl: "",
       owners: owners([])
     },
-    // ===== 2026 秋季学期课程表（与 gantt.md 的 section 课程表 一一对应） =====
-    // 口径：教学周第 1 周周一 = 2026-09-07；「第 N 周周一」= 9.7 + (N−1)×7 天。
-    // 每条 = 一门课的一个固定时段（星期几 + 节次），条形跨越该时段的上课周次。
-    // 课程条目不进入待办提醒链路（deadlines.json / deadlines.ics / 页面「🔔 提醒」）。
+    b8: {
+      short: "就业分享会",
+      who: "",
+      when: "",
+      where: "九教东201",
+      files: "",
+      steps: [],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      tipsImg: "",
+      sampleUrl: "",
+      owners: owners([])
+    },
     k1: {
       short: "数据科学与知识工程(周二第1节)",
       who: "选修本课程的同学（课程号 M510028B，课序号 02）",
