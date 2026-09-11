@@ -551,6 +551,23 @@
       return !!sec && /课程表/.test(sec.name || '');
     }
 
+    /* 课程日事件（id 形如 k1w09）→ 基础课程详情（k1）归一并注入「第N教学周 · 具体日期」。
+       这样按周逐日拆开的 114 条不用在 events.js 里写 114 份复制，点任一课日条都弹同一门课的详情，
+       且「时间要求」动态呈现该具体日期的起止。 */
+    function courseDetailOf(t) {
+      var m = /^k(\d+)w(\d+)$/.exec(t && t.id || '');
+      if (!m) return null;
+      var base = eventsData['k' + m[1]] || null;
+      if (!base) return null;
+      var week = parseInt(m[2], 10);
+      var dd = fmtYMD(t.start);
+      var hm = (t.startTime ? t.startTime : '') + ' - ' + (t.endTime ? t.endTime : '');
+      var o = {};
+      Object.keys(base).forEach(function (k) { o[k] = base[k]; });
+      o.when = '第 ' + week + ' 教学周 · ' + dd + ' ' + hm + (base.when ? '　依课表：' + base.when : '');
+      return o;
+    }
+
     /* ---- 骨架 ---- */
     root.innerHTML =
       '<div class="gv-toolbar">' +
@@ -1324,7 +1341,8 @@
       }, 2600);
     }
     function openDetail(task, fromLabel) {
-      var ev = eventsData[task.id] || null;
+      /* 课程日事件（k1w09 类）→ 归一到基础课程详情，注入具体日期；普通事件直接取 eventsData */
+      var ev = eventsData[task.id] || courseDetailOf(task) || null;
       var sec = secOfTask[task.id] || { name: '' };
       /* 点击左侧：弹窗 + 自动定位到事件日期 + 高亮 */
       if (fromLabel) {

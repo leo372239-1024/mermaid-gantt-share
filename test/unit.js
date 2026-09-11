@@ -206,7 +206,13 @@ if (fs.existsSync(icsPath)) {
 console.log('[9b] 课程表与提醒链路隔离');
 const courseIds = model.sections.filter(s => /课程表/.test(s.name))
   .reduce((a, s) => a.concat(s.tasks.map(t => t.id)), []);
-check(courseIds.length === 12, '甘特图含「课程表」section 且共 12 条（' + courseIds.join(',') + '）');
+check(courseIds.length === 114, '甘特图含「课程表」section 且共 114 条具体上课日事件（' + courseIds.length + '）');
+/* 每五天展开：每条 id 形如 k{基础}w{周}，基础课程 k1..k12；同一周周X 条目起止精确到分钟且同日 */
+const baseCourse = courseIds.map(id => /^(k\d+)w\d+$/.exec(id)[1]);
+check(new Set(baseCourse).size === 12 && /^k\d$/.exec(baseCourse[0]), '展开后仍归一到基础课程 k1..k12（出现 ' + new Set(baseCourse).size + ' 门课）');
+const an = model.sections.filter(s => /课程表/.test(s.name))[0].tasks[0];
+check(/^\d{2}:\d{2}$/.test(an.startTime) && /^\d{2}:\d{2}$/.test(an.endTime),
+  '课程日事件起止精确到分钟（' + an.startTime + ' → ' + an.endTime + '，id ' + an.id + '）');
 check(courseIds.every(id => !dj.items.some(i => i.id === id)),
   '课程表条目未进入 deadlines.json 提醒窗口（否则会显示「截止：<课程名>」）');
 const icsAll = fs.existsSync(icsPath) ? fs.readFileSync(icsPath, 'utf8') : '';
