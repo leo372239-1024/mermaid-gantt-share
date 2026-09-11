@@ -165,12 +165,21 @@ function build() {
     sec.tasks.forEach(function (t) { sectionOf[t.id] = sec.name; });
   });
 
+  /* 课程表（section 名含「课程表」）不是待办截止：
+     周期性上课若进入提醒/日历链路，会产出「⏰ 截止：<课程名>」这类语义错误的条目
+     ——课表条目跨越数周，ics 侧会被压成「结束前 30 分钟」的假截止；
+     而且课表条目会让「今天开始」的通道 C 闹钟清单被上课提醒淹没。
+     过滤口径须与网页端 js/viewer.js 的 isCourseTask() 保持一致（两处必须同时改）。 */
+  const COURSE_SECTION = /课程表/;
+  const isCourseTask = function (t) { return COURSE_SECTION.test(sectionOf[t.id] || ''); };
+
   const items = [];
   const icsItems = [];
 
   model.all.forEach(function (t) {
     if (!t.end) return;
     if (t.done) return;                     // 已完成不再提醒
+    if (isCourseTask(t)) return;            // 课程表：只上图，不进提醒/日历
 
     /* 起止时刻全部取自「编辑表单的日期/时刻组件」（即 gantt.md 里的 OO 段），精确到分钟 */
     const eh = dueHmOf(t);

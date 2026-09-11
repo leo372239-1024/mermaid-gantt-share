@@ -542,6 +542,15 @@
     /* 全部任务 */
     var tasksAll = model.all;
 
+    /* 课程表条目（section 名含「课程表」）只上图，不进待办提醒链路 ——
+       周期性上课不是「截止待办」：进入提醒面板会显示「<课程名> 截止」，
+       导出的 .ics 会变成「结束前 30 分钟」的假截止，通道 C 的今日闹钟清单也会被上课提醒淹没。
+       口径与构建端 tools/build-deadlines.js 的 isCourseTask() 一致（两处必须同时改）。 */
+    function isCourseTask(t) {
+      var sec = (t && secOfTask) ? secOfTask[t.id] : null;
+      return !!sec && /课程表/.test(sec.name || '');
+    }
+
     /* ---- 骨架 ---- */
     root.innerHTML =
       '<div class="gv-toolbar">' +
@@ -1505,6 +1514,7 @@
       for (var i = 0; i < model.all.length; i++) {
         var t = model.all[i];
         if (t.done) continue;
+        if (isCourseTask(t)) continue;      /* 课程表：只上图，不进待办提醒 */
         var leftMs = remLeftMs(t, now);
         if (leftMs == null || leftMs < 0 || leftMs > DAY) continue;
         out.push(t);
@@ -1742,6 +1752,7 @@
       var dayStart = dateOnly(now).getTime();
       return model.all.filter(function (t) {
         if (t.done || !t.end) return false;
+        if (isCourseTask(t)) return false;   /* 课程表：只上图，不导出为待办/日历 */
         var dl = remDeadlineOf(t);
         return dl != null && dl >= dayStart && dl <= horizon;
       });
@@ -1758,6 +1769,7 @@
       var doneIds = loadRemDone();
       return model.all.filter(function (t) {
         if (t.done || doneIds.indexOf(t.id) >= 0) return false;
+        if (isCourseTask(t)) return false;   /* 课程表：只上图，不建系统闹钟 */
         var sd = t.start || t.end;
         if (!sd || fmtYMD(sd) !== today || !remStartHM(t).exact) return false;
         var d = alarmAtOf(t);

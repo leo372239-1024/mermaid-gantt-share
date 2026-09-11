@@ -41,7 +41,7 @@ console.log('[1] gantt.md 解析');
 const code = readGanttMd();
 const model = Parser.parse(code);
 check(!!model && !!model.range, '解析成功，得到有效时间范围');
-check(model.sections.length === 8, '包含 8 个 section（实际 ' + model.sections.length + '）');
+check(model.sections.length === 9, '包含 9 个 section（实际 ' + model.sections.length + '）');
 check(model.all.length >= 25, '任务总数 >= 25（实际 ' + model.all.length + '）');
 const fatal = model.warnings.filter(w => /缺少有效日期|未能从代码中解析/.test(w));
 check(fatal.length === 0, '无致命告警（日期缺失/无法解析）');
@@ -183,8 +183,15 @@ const w25 = dj.items.filter(i => i.id === 't25')[0];
 check(!!w25 && w25.time === '17:00', '截止时刻精确到分钟 time=' + (w25 && w25.time));
 check(!!w25 && w25.window === '9.10 14:00 → 9.10 17:00', '起止文案分钟级 window=' + (w25 && w25.window));
 check(!!w25 && Date.parse(w25.dueAt) === Date.parse('2026-09-10T09:00:00Z'), 'dueAt = 北京时间 17:00 的绝对时刻');
+/* b2 的日期组件口径（数据侧，与时间无关） */
+const b2T = model.byId('b2');
+check(!!b2T && Parser.fmt(b2T.end) === '2026-09-09',
+  'b2 户口迁移证截止口径 = 日期组件的 2026-09-09（实际 ' + (b2T && Parser.fmt(b2T.end)) + '）');
+/* b2 是否落在提醒窗口内取决于当天日期（9.9 之后 1 天宽限即出窗），断言写成条件式，
+   否则这条会在 9.11 之后永久假红 —— 那是"数据过期"，不是回归 */
 const b2it = dj.items.filter(i => i.id === 'b2')[0];
-check(!!b2it && b2it.due === '2026-09-09', 'b2 户口迁移证截止口径 = 日期组件的 2026-09-09');
+check(!b2it || b2it.due === '2026-09-09',
+  'b2 若在提醒窗口内则 due 与日期组件一致（当前 ' + (b2it ? '在窗口内' : '已过宽限期，不在窗口内') + '）');
 const icsPath = path.join(ROOT, 'deadlines.ics');
 check(fs.existsSync(icsPath), 'deadlines.ics 已生成（可订阅的系统日历源）');
 if (fs.existsSync(icsPath)) {
@@ -194,6 +201,17 @@ if (fs.existsSync(icsPath)) {
   check(nEv === (icsTxt.match(/END:VEVENT/g) || []).length, 'VEVENT 开闭标签配平');
   check((icsTxt.match(/BEGIN:VALARM/g) || []).length === nEv * 2, '每条事件恰好 2 个 VALARM');
 }
+
+/* ---- 9b. 课程表条目不得进入待办提醒链路 ---- */
+console.log('[9b] 课程表与提醒链路隔离');
+const courseIds = model.sections.filter(s => /课程表/.test(s.name))
+  .reduce((a, s) => a.concat(s.tasks.map(t => t.id)), []);
+check(courseIds.length === 12, '甘特图含「课程表」section 且共 12 条（' + courseIds.join(',') + '）');
+check(courseIds.every(id => !dj.items.some(i => i.id === id)),
+  '课程表条目未进入 deadlines.json 提醒窗口（否则会显示「截止：<课程名>」）');
+const icsAll = fs.existsSync(icsPath) ? fs.readFileSync(icsPath, 'utf8') : '';
+check(courseIds.every(id => icsAll.indexOf('gantt-' + id + '@') < 0),
+  '课程表条目未进入 deadlines.ics 日历订阅源（否则会出现假「截止」事件）');
 
 /* ---- 10. 防误删闸门（过期快照体检） ---- */
 console.log('[10] 保存前的「过期快照」体检');
@@ -272,12 +290,22 @@ check(JSON.stringify(alarmIds) === JSON.stringify(dj.items.filter(i => i.startDa
   'alarmItems 与 items 的今日子集完全一致（不多不少）');
 check(dj.items.some(i => i.startDaysLeft !== 0) && dj.alarmItems.length < dj.items.length,
   '窗口内存在非今日/未填时刻的条目（共 ' + (dj.items.length - dj.alarmItems.length) + ' 条），均未进入 alarmItems —— 今天不会误建闹钟');
-/* startDaysLeft 必须按「开始日」算，否则今天开始、跨日结束的活动会被漏掉闹钟 */
-const cB6 = dj.items.filter(i => i.id === 'b6')[0];
-check(!!cB6 && cB6.startDaysLeft < cB6.daysLeft,
-  'startDaysLeft 按开始日计算（b6 8.25→9.9：startDaysLeft=' + (cB6 && cB6.startDaysLeft) + ' < daysLeft=' + (cB6 && cB6.daysLeft) + '）');
-check(!!cB6 && cB6.alarmExact === false, '未填开始时刻 → alarmExact=false（该条不应建闹钟）');
-check(!dj.alarmItems.some(i => i.alarmExact === false), '未填开始时刻的条目不会进入 alarmItems（b6/b2 等已被排除）');
+/* startDaysLeft 必须按「开始日」算，否则今天开始、跨日结束的活动会被漏掉闹钟。
+   原来把断言钉在 b6（8.25→9.9）上，9.9 一过它就出窗 → 断言变成"数据过期"式假红。
+   改为「取窗口内任一跨日条目」验证；窗口内全是同日条目时退化为验证相等。 */
+const cSpan = dj.items.filter(i => i.start !== i.due)[0];
+if (cSpan) {
+  check(cSpan.startDaysLeft < cSpan.daysLeft,
+    'startDaysLeft 按开始日计算（' + cSpan.id + ' ' + cSpan.start + '→' + cSpan.due + '：startDaysLeft=' +
+    cSpan.startDaysLeft + ' < daysLeft=' + cSpan.daysLeft + '）');
+} else {
+  check(dj.items.every(i => i.startDaysLeft === i.daysLeft),
+    '窗口内全为同日条目 → startDaysLeft === daysLeft（' + dj.items.length + ' 条）');
+}
+const cNotExact = dj.items.filter(i => i.startExact === false)[0];
+check(!!cNotExact && cNotExact.alarmExact === false,
+  '未填开始时刻 → alarmExact=false（' + (cNotExact && cNotExact.id) + '，该条不应建闹钟）');
+check(!dj.alarmItems.some(i => i.alarmExact === false), '未填开始时刻的条目不会进入 alarmItems');
 check(dj.items.every(i => i.alarmExact === i.startExact), 'alarmExact 与 startExact 同源');
 /* 跨零点：开始 00:05 → 闹钟落在前一天 23:50，靠 Date 自动跨日而不是手工借位 */
 const midnight = { start: new Date(2026, 8, 11), end: new Date(2026, 8, 11), startTime: '00:05', endTime: '00:05' };
@@ -336,8 +364,10 @@ check(kindOptions.length === 2 && !/value="crit"/.test(viewerSrc.slice(viewerSrc
 console.log('[13] 合并写回护栏（整份覆盖 → 合并）');
 /* 事故复现：远端有 b7、本页没有（浏览器用了缓存的旧 events.js）→ 合并后必须逐字保留 */
 const blocks = Admin.blocksOf(realSrc);
-check(Object.keys(blocks).sort().join(',') === 'b1,b2,b3,b4,b5,b6,b7',
-  'blocksOf 切出全部条目的原文块（' + Object.keys(blocks).join(',') + '）');
+const bkB = Object.keys(blocks).filter(k => /^b\d+$/.test(k)).sort();
+const bkK = Object.keys(blocks).filter(k => /^k\d+$/.test(k)).sort();
+check(bkB.join(',') === 'b1,b2,b3,b4,b5,b6,b7' && bkK.length === 12,
+  'blocksOf 切出全部条目的原文块（班务 ' + bkB.length + ' 条 + 课表 ' + bkK.length + ' 条）');
 check(blocks.b7.split('\n')[0].trim() === 'b7: {', '块首是条目行（' + blocks.b7.split('\n')[0].trim() + '）');
 check(blocks.b7.split('\n').pop().trim() === '},', '块尾是结束行「},」，切分边界正确');
 check(blocks.b7.indexOf('主校区西操场') > 0, 'b7 的原文块里带着地点');
