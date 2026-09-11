@@ -542,14 +542,10 @@
     /* 全部任务 */
     var tasksAll = model.all;
 
-    /* 课程表条目（section 名含「课程表」）只上图，不进待办提醒链路 ——
-       周期性上课不是「截止待办」：进入提醒面板会显示「<课程名> 截止」，
-       导出的 .ics 会变成「结束前 30 分钟」的假截止，通道 C 的今日闹钟清单也会被上课提醒淹没。
-       口径与构建端 tools/build-deadlines.js 的 isCourseTask() 一致（两处必须同时改）。 */
-    function isCourseTask(t) {
-      var sec = (t && secOfTask) ? secOfTask[t.id] : null;
-      return !!sec && /课程表/.test(sec.name || '');
-    }
+    /* 课程表条目（section 名含「课程表」）自 v28 起也进入待办提醒链路 ——
+       用户希望今明两日的课也能设「时钟」系统闹钟。课表条目起止精确到分钟，
+       进提醒面板/导出日历/通道 C 闹钟清单均语义正确（alarmLabel=课程名｜教室｜起止）。
+    */
 
     /* 课程日事件（id 形如 k1w09）→ 基础课程详情（k1）归一并注入「第N教学周 · 具体日期」。
        这样按周逐日拆开的 114 条不用在 events.js 里写 114 份复制，点任一课日条都弹同一门课的详情，
@@ -1532,7 +1528,6 @@
       for (var i = 0; i < model.all.length; i++) {
         var t = model.all[i];
         if (t.done) continue;
-        if (isCourseTask(t)) continue;      /* 课程表：只上图，不进待办提醒 */
         var leftMs = remLeftMs(t, now);
         if (leftMs == null || leftMs < 0 || leftMs > DAY) continue;
         out.push(t);
@@ -1770,7 +1765,6 @@
       var dayStart = dateOnly(now).getTime();
       return model.all.filter(function (t) {
         if (t.done || !t.end) return false;
-        if (isCourseTask(t)) return false;   /* 课程表：只上图，不导出为待办/日历 */
         var dl = remDeadlineOf(t);
         return dl != null && dl >= dayStart && dl <= horizon;
       });
@@ -1787,7 +1781,6 @@
       var doneIds = loadRemDone();
       return model.all.filter(function (t) {
         if (t.done || doneIds.indexOf(t.id) >= 0) return false;
-        if (isCourseTask(t)) return false;   /* 课程表：只上图，不建系统闹钟 */
         var sd = t.start || t.end;
         if (!sd || fmtYMD(sd) !== today || !remStartHM(t).exact) return false;
         var d = alarmAtOf(t);

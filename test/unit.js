@@ -9,7 +9,7 @@
  *   4) events.js 字段完整性（who/when/where/files/steps/owners 等）
  *   5) viewer.js 模块可正常加载并暴露 mount
  *   6) 消息级口径回归：分钟级时间 / 通道 C 闹钟（名称｜地点｜起止）/ 编辑表单 / 合并写回护栏
- *      （13 节 100 项；数据类断言一律从数据推导，不把某条任务的时刻写死）
+ *      （13 节，断言数随数据推导；数据类断言一律从数据推导，不把某条任务的时刻写死）
  */
 'use strict';
 const fs = require('fs');
@@ -202,22 +202,26 @@ if (fs.existsSync(icsPath)) {
   check((icsTxt.match(/BEGIN:VALARM/g) || []).length === nEv * 2, '每条事件恰好 2 个 VALARM');
 }
 
-/* ---- 9b. 课程表条目不得进入待办提醒链路 ---- */
-console.log('[9b] 课程表与提醒链路隔离');
+/* ---- 9b. 课程表条目（v28 起）进入待办提醒链路 ---- */
+console.log('[9b] 课程表与提醒链路');
 const courseIds = model.sections.filter(s => /课程表/.test(s.name))
   .reduce((a, s) => a.concat(s.tasks.map(t => t.id)), []);
-check(courseIds.length === 114, '甘特图含「课程表」section 且共 114 条具体上课日事件（' + courseIds.length + '）');
+check(courseIds.length === 114, '甘特图含「课程表」section 且按教学周展开为 114 条上课日事件（' + courseIds.length + ' 条）');
 /* 每五天展开：每条 id 形如 k{基础}w{周}，基础课程 k1..k12；同一周周X 条目起止精确到分钟且同日 */
 const baseCourse = courseIds.map(id => /^(k\d+)w\d+$/.exec(id)[1]);
 check(new Set(baseCourse).size === 12 && /^k\d$/.exec(baseCourse[0]), '展开后仍归一到基础课程 k1..k12（出现 ' + new Set(baseCourse).size + ' 门课）');
-const an = model.sections.filter(s => /课程表/.test(s.name))[0].tasks[0];
+const an = model.sections.filter(m => /课程表/.test(m.name))[0].tasks[0];
 check(/^\d{2}:\d{2}$/.test(an.startTime) && /^\d{2}:\d{2}$/.test(an.endTime),
   '课程日事件起止精确到分钟（' + an.startTime + ' → ' + an.endTime + '，id ' + an.id + '）');
-check(courseIds.every(id => !dj.items.some(i => i.id === id)),
-  '课程表条目未进入 deadlines.json 提醒窗口（否则会显示「截止：<课程名>」）');
+/* v28：课程条目进入 deadlines.json 提醒窗口与 deadlines.ics 日历源——
+   21 世纪近 180 天内的上课日均在窗口内，应能查到任意一条展开后的 k* 事件 */
+const djCourse = dj.items.filter(i => courseIds.indexOf(i.id) >= 0);
+check(djCourse.length >= 1, '课程日事件已进入 deadlines.json 提醒窗口（' + djCourse.length + ' 条）');
+check(djCourse[0] && /｜/.test(djCourse[0].alarmLabel), '课程闹钟标签含字段分隔（alarmLabel=' + (djCourse[0] && djCourse[0].alarmLabel) + '）');
+check(djCourse[0] && /^\d{2}:\d{2}$/.test(djCourse[0].alarmTime), '课程闹钟时刻精确到分钟（alarmTime=' + (djCourse[0] && djCourse[0].alarmTime) + '）');
 const icsAll = fs.existsSync(icsPath) ? fs.readFileSync(icsPath, 'utf8') : '';
-check(courseIds.every(id => icsAll.indexOf('gantt-' + id + '@') < 0),
-  '课程表条目未进入 deadlines.ics 日历订阅源（否则会出现假「截止」事件）');
+check(courseIds.some(id => icsAll.indexOf('gantt-' + id + '@') >= 0),
+  '至少 1 条课程日事件已进入 deadlines.ics 日历订阅源（可订阅到日历）');
 
 /* ---- 10. 防误删闸门（过期快照体检） ---- */
 console.log('[10] 保存前的「过期快照」体检');

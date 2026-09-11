@@ -371,7 +371,12 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
       const f = t => (t.getMonth() + 1) + '.' + t.getDate();
       return { today: f(new Date()), yest: f(new Date(Date.now() - 86400000)) };
     });
-    const dts = bullets.map(l => (l.match(/(\d{1,2}\.\d{1,2}) \d{2}:\d{2}/) || [])[1]).filter(Boolean);
+    const dts = bullets.map(l => {
+      /* 只取「｜」之后的起止段（避免课程名里内嵌的「MM.DD HH:mm」（如 09.11 14:10）被误抓；
+         真正的开始日期在 alarmLabel 的最后一段（名称｜地点｜起止） */
+      const afterSep = (l.split('｜').pop() || '');
+      return (afterSep.match(/(\d{1,2}\.\d{1,2}) \d{2}:\d{2}/) || [])[1];
+    }).filter(Boolean);
     const dset = Array.from(new Set(dts));
     check(dset.length === 0 || dset.every(d => d === md.today || d === md.yest),
       '清单只含「今天开始」的条目（出现日期 ' + dset.join('/') + '，含跨零点回退的昨天 ' + md.yest + '）');

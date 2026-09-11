@@ -165,13 +165,11 @@ function build() {
     sec.tasks.forEach(function (t) { sectionOf[t.id] = sec.name; });
   });
 
-  /* 课程表（section 名含「课程表」）不是待办截止：
-     周期性上课若进入提醒/日历链路，会产出「⏰ 截止：<课程名>」这类语义错误的条目
-     ——课表条目跨越数周，ics 侧会被压成「结束前 30 分钟」的假截止；
-     而且课表条目会让「今天开始」的通道 C 闹钟清单被上课提醒淹没。
-     过滤口径须与网页端 js/viewer.js 的 isCourseTask() 保持一致（两处必须同时改）。 */
-  const COURSE_SECTION = /课程表/;
-  const isCourseTask = function (t) { return COURSE_SECTION.test(sectionOf[t.id] || ''); };
+  /* 课程表（section 名含「课程表」）默认不过滤：课表上的上课日事件也进入提醒/日历/系统闹钟链路
+     （v28 起按用户要求放开——今明两日的课也要能设「时钟」闹钟提醒）。
+     每条 id 形如 k{w基础}w{周}，起止精确到分钟内；alarmLabel 已是「课程名｜教室｜起止」，语义正确。
+     注：课程条目只对「今天开始」的那些（startDaysLeft===0 且已填开始时刻）进通道 C 闹钟，
+     由 alarmItems 筛选天然控制，不会淹没；日历侧在 180 天窗口内的课按各自起止生成事件。 */
 
   const items = [];
   const icsItems = [];
@@ -179,7 +177,6 @@ function build() {
   model.all.forEach(function (t) {
     if (!t.end) return;
     if (t.done) return;                     // 已完成不再提醒
-    if (isCourseTask(t)) return;            // 课程表：只上图，不进提醒/日历
 
     /* 起止时刻全部取自「编辑表单的日期/时刻组件」（即 gantt.md 里的 OO 段），精确到分钟 */
     const eh = dueHmOf(t);
