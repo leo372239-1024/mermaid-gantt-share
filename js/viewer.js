@@ -71,6 +71,10 @@
   border-color:transparent;color:#fff;box-shadow:0 8px 22px -6px rgba(79,70,229,.5)}
 .gv-tbtn.gv-fsbtn{color:#475569;border-color:#e2e8f0}
 .gv-tbtn.gv-fsbtn:hover{color:#3730a3}
+.gv-tbtn.gv-coursebtn{color:#0e7490;border-color:#a5f3fc;background:#ecfeff;font-weight:600}
+.gv-tbtn.gv-coursebtn:hover{background:#cffafe;border-color:#22d3ee;color:#155e75;transform:translateY(-1px)}
+.gv-tbtn.gv-coursebtn.off{color:#475569;border-color:#e2e8f0;background:#fff}
+.gv-tbtn.gv-coursebtn.off:hover{background:#f8fafc;color:#334155}
 /* 浏览器内全屏：原生 Fullscreen API 生效态（桌面/Android/iPad） */
 .gv-root:fullscreen{background:#fafafa;overflow:auto;padding:14px 16px;width:100%;height:100%}
 .gv-root:-webkit-full-screen{background:#fafafa;overflow:auto;padding:14px 16px;width:100%;height:100%}
@@ -542,6 +546,13 @@
     /* 全部任务 */
     var tasksAll = model.all;
 
+    /* ---- 课程事件隐藏/显示（v32）：课程日事件 id 形如 k1w09（k=课程号,w=教学周），
+           名字/详情里以「课程表」小节承载。点击工具栏「📚 隐藏课程」一键切换。
+           showCourse=false 时：不渲染课程时间条、左列索引、轨道计算，只保留课程详情可达的普通事件。 */
+    var showCourse = true;
+    function isCourseTask(t) { return /^k\d+w\d+$/.test((t && t.id) || ''); }
+    function visibleTasks() { return showCourse ? tasksAll : tasksAll.filter(function (t) { return !isCourseTask(t); }); }
+
     /* 课程表条目（section 名含「课程表」）自 v28 起也进入待办提醒链路 ——
        用户希望今明两日的课也能设「时钟」系统闹钟。课表条目起止精确到分钟，
        进提醒面板/导出日历/通道 C 闹钟清单均语义正确（alarmLabel=课程名｜教室｜起止）。
@@ -577,6 +588,7 @@
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
+      '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认显示）">📚 隐藏课程</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
       '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
       '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看ddl(截止不足一天)提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +
@@ -644,10 +656,15 @@
     function buildLabelList() {
       lboxEl.innerHTML = '';
       labelRowByTask = {};
+      var vis = visibleTasks();
+      var visSet = {};
+      vis.forEach(function (t) { visSet[t.id] = 1; });
       model.sections.forEach(function (sec) {
-        var secHead = el('div', 'gv-lsec', esc(sec.name) + '（' + sec.tasks.length + '）');
+        var secTasks = sec.tasks.filter(function (t) { return visSet[t.id]; });
+        if (!secTasks.length) return;
+        var secHead = el('div', 'gv-lsec', esc(sec.name) + '（' + secTasks.length + '）');
         lboxEl.appendChild(secHead);
-        sec.tasks.forEach(function (t) {
+        secTasks.forEach(function (t) {
           var dot = '';
           if (t.milestone || t.point) dot = '<span class="dot">◆</span>';
           else dot = '<span class="dot">▪</span>';
@@ -660,7 +677,7 @@
           labelRowByTask[t.id] = cell;
         });
       });
-      lcntEl.textContent = tasksAll.length;
+      lcntEl.textContent = vis.length;
     }
     buildLabelList();
 
@@ -684,7 +701,11 @@
     var viewOverride = null;
     function effLand() { return viewOverride === 'land' ? true : (viewOverride === 'normal' ? false : autoLand); }
     var isLand = effLand();
-    var viewDays = isLand ? 53 : (isMobile ? 47 : 65); // 视口覆盖天数（默认档 = 点击一次放大的时间范围，原 110/80/90 → ÷1.7）
+    /* 默认视图改为「在当前缩放档位上连续放大 4 次」后的视野跨度：
+       逻辑：旧默认桌面 65 → ÷1.7×4 次 ≈ 7.8 天，被 MIN_VIEW=10 钳制到 10；手机/横屏同理收敛到 10。
+       于是所有设备首次打开都默认聚焦 10 天（约一周半），配合「周几」刻度直接看课表。
+       保持 MIN_VIEW=10 不变，缩放操作的中位数仍以 1.7×递增。 */
+    var viewDays = 10; // 默认 = MIN_VIEW（10），即「连点 4 次放大」后的视野跨度（MIN_VIEW 定义在下方视图状态区）
     var MIN_VIEW = 10, MAX_VIEW = Math.max(totalDays * 1.02, 400);
 
     function pw() { return Math.max(scrollEl.clientWidth, 200); }
@@ -693,7 +714,7 @@
     /* 每帧轨道分配：按像素区间贪心，重叠者落到下一轨道（多任务可同一行） */
     function computeTracks() {
       var px = pxPerDay();
-      var sorted = tasksAll.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+      var sorted = visibleTasks().slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
       var ends = [];
       var trackOf = {};
       sorted.forEach(function (t) {
@@ -863,10 +884,13 @@
           lastLabelX = xm;
         }
       }
-      /* 天刻度：【每一天】的日期数字放在该日区间的正中（原来贴在日界线上，视觉上分不清属于哪一天；
-         日界线本身已由逐日交替底色表达，不再画冗余细网格） */
+      /* 天刻度：【每一天】的日期与「周几」放在该日区间的正中（原来贴在日界线上，视觉上分不清属于哪一天；
+         v32 起在日期右侧补「星期x」，方便逐周看课/盯节奏；周末（六/日）用偏红标出，一眼定位休息日）。
+         日界线本身已由逐日交替底色表达，不再画冗余细网格 */
       var redXs = redLineXs(px);
-      if (px >= 10.5) {
+      var WEEKCN = ['日', '一', '二', '三', '四', '五', '六'];
+      var dayLabelXs = [];     // 已放天刻度中心，避免过密（px 窄时只放数字，不再叠加周几）
+      if (px >= 9.5) {
         for (var dj = 0; dj < totalDays; dj++) {
           var ddt = addDays(minDate, dj);
           var ddx2 = LEFT_PAD + (dj + 0.5) * px;          /* 日中心 */
@@ -877,7 +901,20 @@
           }
           if (tooNear) continue;
           if (ddx2 < LEFT_PAD + 7 || ddx2 > worldW - RIGHT_PAD - 4) continue;
-          S += '<text x="' + ddx2.toFixed(1) + '" y="' + (AXIS_H + 2) + '" text-anchor="middle" font-size="8.5" fill="#7e93a6">' + ddt.getDate() + '</text>';
+          /* 相邻天刻度标签最小间距：避免狭窄时「日期+周几」互相咬字 */
+          if (dayLabelXs.length && (ddx2 - dayLabelXs[dayLabelXs.length - 1]) < 16) continue;
+          dayLabelXs.push(ddx2);
+          var dow = ddt.getDay();
+          var isWeekend = (dow === 0 || dow === 6);
+          /* 显示周几：仅当单个日格足够宽（px>=16）才在日期后带「周几」，否则只给日期数字 */
+          if (px >= 16) {
+            var dCol = isWeekend ? '#dc2626' : '#7e93a6';
+            var wCol = isWeekend ? '#b91c1c' : '#94a3b8';
+            S += '<text x="' + ddx2.toFixed(1) + '" y="' + (AXIS_H + 2) + '" text-anchor="middle" font-size="8.5" font-weight="600" fill="' + dCol + '">' + ddt.getDate() + ' ' + '<tspan fill="' + wCol + '" font-weight="600">周' + WEEKCN[dow] + '</tspan></text>';
+          } else {
+            var dCol2 = isWeekend ? '#dc2626' : '#7e93a6';
+            S += '<text x="' + ddx2.toFixed(1) + '" y="' + (AXIS_H + 2) + '" text-anchor="middle" font-size="8.5" font-weight="600" fill="' + dCol2 + '">' + ddt.getDate() + '</text>';
+          }
         }
       }
       curMonthLabelXs = monthLabelXs;
@@ -912,7 +949,7 @@
       }
 
       /* ---- 第一遍：普通时间条 ---- */
-      tasksAll.forEach(function (t) {
+      visibleTasks().forEach(function (t) {
         if (t.point || t.milestone) return;
         /* 起止按「日期 + 分钟级时刻」比例定位与定长：3 小时的事件就是 1/8 天宽（最小 3px 保可点） */
         var x1 = xOfSpanStart(t), x2 = xOfSpanEnd(t);
@@ -1067,7 +1104,7 @@
       }
 
       /* ---- 第二遍：里程碑/当日点（菱形+旁标）与过窄条外置名称标注 ---- */
-      tasksAll.forEach(function (t) {
+      visibleTasks().forEach(function (t) {
         var x1 = xOfPoint(t);   /* 分钟级定位：填了时刻落该分钟；未填取当日正中 */
         var k = layout.trackOf[t.id];
         var cy = yOfTrack(k) + rowH / 2;
@@ -1182,6 +1219,14 @@
     document.addEventListener('webkitfullscreenchange', syncFsIcon);
 
     /* ---- 工具条 ---- */
+    function syncCourseBtn() {
+      var btn = toolbar.querySelector('[data-act="toggleCourse"]');
+      if (!btn) return;
+      btn.classList.toggle('off', !showCourse);
+      btn.textContent = showCourse ? '📚 隐藏课程' : '📚 显示课程';
+      btn.title = showCourse ? '一键隐藏所有课程事件' : '一键显示所有课程事件';
+    }
+    syncCourseBtn();
     toolbar.addEventListener('click', function (ev) {
       var b = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
       if (!b) return;
@@ -1223,6 +1268,14 @@
           newDays = viewDays > 60 ? 45 : viewDays;
           target = new Date(c.getFullYear(), c.getMonth() + 1, 15);
           break;
+        case 'toggleCourse':
+          showCourse = !showCourse;
+          syncCourseBtn();
+          /* 隐藏/显示课程 → 重建左列 + 保持中心重绘 */
+          buildLabelList();
+          redraw(centerDate());
+          toast(showCourse ? '已显示全部课程事件' : '已隐藏全部课程事件，仅展示非课程安排');
+          return;
       }
       if (target) {
         if (target < minDate) target = new Date(minDate);
