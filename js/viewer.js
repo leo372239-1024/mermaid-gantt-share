@@ -98,6 +98,7 @@
 .gv-labels.collapsed .gv-lhead{flex-direction:column;gap:8px;padding:8px 3px;background:#fafbff}
 .gv-labels.collapsed .gv-lhead .gv-lttl{display:none}
 .gv-labels.collapsed .gv-lbox{display:none}
+/* ---- 左侧事件列表（v33：平铺全部事件/时间点，最新修改在最上面，超出可纵向滚动） ---- */
 .gv-lhead{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:12px;font-weight:700;
   color:#4338ca;background:linear-gradient(180deg,#f5f7ff,#fafbff);border-bottom:1px solid var(--gv-line-soft)}
 .gv-lhead .cnt{color:#64748b;font-weight:600;font-size:11px;background:#fff;border:1px solid #e2e8f0;
@@ -106,7 +107,18 @@
 .gv-chev{flex:0 0 auto;border:1px solid #c7d2fe;background:#fff;color:#4f46e5;border-radius:8px;cursor:pointer;
   font-size:12px;line-height:1;padding:5px 8px;transition:background .2s,transform .2s}
 .gv-chev:hover{background:#eef2ff;transform:translateY(-1px)}
-.gv-lbox{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding-bottom:4px}
+/* 滚动容器：平铺后条数 = 任务总数（含 114 条课程日事件），一屏必然放不下 →
+   这里必须是一个「有确定高度上限」的滚动区，否则 flex 会把它撑到内容高度、把整个页面顶长。
+   高度取「视口高 − 工具栏/图例/头部占位」，保证滚动条始终出现在列表内部而非页面级。 */
+.gv-lbox{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  max-height:calc(100vh - 190px);min-height:120px;padding-bottom:4px}
+/* 滚动条常显且加宽（macOS/Windows 默认滚动条在浅色底上几乎看不见，
+   而「一屏放不下时可滚动」是明确的产品要求 → 必须让用户一眼看出这里能滚） */
+.gv-lbox{scrollbar-width:thin;scrollbar-color:#c7d2fe #f6f8fc}
+.gv-lbox::-webkit-scrollbar{width:9px}
+.gv-lbox::-webkit-scrollbar-track{background:#f6f8fc;border-radius:9px}
+.gv-lbox::-webkit-scrollbar-thumb{background:#c7d2fe;border-radius:9px;border:2px solid #f6f8fc}
+.gv-lbox::-webkit-scrollbar-thumb:hover{background:#a5b4fc}
 .gv-lsec{position:sticky;top:0;background:linear-gradient(180deg,#eef2ff,#f5f7ff);color:#4338ca;font-weight:700;
   font-size:11px;padding:5px 9px;z-index:2;border-bottom:1px solid var(--gv-line-soft);letter-spacing:.2px}
 .gv-lname{display:flex;align-items:flex-start;gap:5px;padding:6px 9px;cursor:pointer;font-size:11.5px;color:#334155;
@@ -117,6 +129,11 @@
 .gv-lname .nm{flex:1 1 auto;min-width:0}
 .gv-lname .nm b{display:block;font-weight:600;color:#1e293b;font-size:11.5px;white-space:normal;word-break:break-all}
 .gv-lname .nm .dt{display:block;font-size:10px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 平铺后每条自带「序号 + 类型角标」：序号对齐详情页的 #N，类型角标区分事件/时间点 */
+.gv-lname .nm .dt .sq{color:#a5b4fc;font-weight:700;margin-right:4px}
+.gv-lname .nm .kbadge{display:inline-block;margin-left:5px;font-size:9.5px;font-weight:700;border-radius:999px;
+  padding:0 5px;vertical-align:1px;background:#eef2ff;color:#4f46e5;border:1px solid #e0e7ff}
+.gv-lname .nm .kbadge.pt{background:#f5f3ff;color:#6d28d9;border-color:#ede9fe}
 /* ---- 右侧滚动时间图 ---- */
 .gv-scroll{flex:1 1 auto;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;min-width:0}
 .gv-scroll svg{display:block}
@@ -151,7 +168,7 @@
 .gv-close{position:sticky;top:0;float:right;border:none;background:#f1f5f9;width:32px;height:32px;border-radius:50%;
   cursor:pointer;font-size:15px;color:#475569;transition:background .2s,transform .2s}
 .gv-close:hover{background:#e2e8f0;transform:rotate(90deg)}
-/* ---- 提醒消息弹窗（截止不足一天） ---- */
+/* ---- 提醒消息弹窗（截止时间落在当天） ---- */
 .gv-rembtn{position:relative}
 .gv-rem-badge{position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;
   background:#ef4444;color:#fff;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center;
@@ -591,7 +608,7 @@
       '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认显示）">📚 隐藏课程</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
       '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
-      '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看ddl(截止不足一天)提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +
+      '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看「今天截止」的待办提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +
       '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图">⛶ 全屏</button>' +
       '</div>' +
       '<div class="gv-legend" id="gv-legend"></div>' +
@@ -653,29 +670,53 @@
     var seqById = {};
     model.all.forEach(function (t, i) { seqById[t.id] = i + 1; });
     var labelRowByTask = {};
+    /* ---- 左侧事件列表（v33：平铺 + 最新修改在最上面） ----
+       为什么不再按 section 分区：
+         section（阶段）是**数据组织维度**，不是用户此刻要处理的东西。同学打开左栏是为了
+         「找到某件事 → 点开看要做啥」，而「分布在哪个阶段」对他来说没有检索价值 ——
+         分区头（9 个）反而吃掉了本就局促的纵向空间。
+       排序：最新修改的排最上面（modTs 大者优先）→ 同时间戳按 ID 序号升序（稳定、可预期）。
+         modTs 来自本机 localStorage（只有在这台设备上编辑过的条目才有），
+         没有记录的一律排在后面 —— 保证「刚改的那条一定在最上面」，而不是被历史的条目挤下去。 */
+    var MOD_KEY = 'mermaid-gantt.modTs.v1';
+    function loadModTs() {
+      try { var o = JSON.parse(localStorage.getItem(MOD_KEY)); return (o && typeof o === 'object') ? o : {}; }
+      catch (e) { return {}; }
+    }
+    function saveModTs(o) {
+      try { localStorage.setItem(MOD_KEY, JSON.stringify(o)); } catch (e) {}
+    }
+    /* 记下某条目被修改的时刻（表单提交 / 删除时调用）。只增不减：
+       删掉的条目留着时间戳无害，还能避免「删完再新增同名」时误用旧序号。 */
+    function touchModTs(id) {
+      if (!id) return;
+      var o = loadModTs();
+      o[id] = Date.now();
+      saveModTs(o);
+    }
     function buildLabelList() {
       lboxEl.innerHTML = '';
       labelRowByTask = {};
       var vis = visibleTasks();
-      var visSet = {};
-      vis.forEach(function (t) { visSet[t.id] = 1; });
-      model.sections.forEach(function (sec) {
-        var secTasks = sec.tasks.filter(function (t) { return visSet[t.id]; });
-        if (!secTasks.length) return;
-        var secHead = el('div', 'gv-lsec', esc(sec.name) + '（' + secTasks.length + '）');
-        lboxEl.appendChild(secHead);
-        secTasks.forEach(function (t) {
-          var dot = '';
-          if (t.milestone || t.point) dot = '<span class="dot">◆</span>';
-          else dot = '<span class="dot">▪</span>';
-          var cell = el('div', 'gv-lname',
-            dot +
-            '<span class="nm"><b>' + esc(t.name) + '</b>' +
-            '<span class="dt">' + esc(ymdRange(t)) + '</span></span>');
-          cell.addEventListener('click', function () { openDetail(t, true); });
-          lboxEl.appendChild(cell);
-          labelRowByTask[t.id] = cell;
-        });
+      var modTs = loadModTs();
+      var ordered = vis.slice().sort(function (a, b) {
+        var ta = modTs[a.id] || 0, tb = modTs[b.id] || 0;
+        if (ta !== tb) return tb - ta;                                  /* 最新修改在前 */
+        return (seqById[a.id] || 0) - (seqById[b.id] || 0);              /* 同为「未改过」→ 按 gantt.md 原序 */
+      });
+      ordered.forEach(function (t) {
+        var isPt = !!(t.milestone || t.point);
+        var dot = isPt ? '<span class="dot">◆</span>' : '<span class="dot">▪</span>';
+        /* v33：平铺后每条都带上第 4 位序号 + 类型角标，避免「丢了分区头」后无法区分事件与时间点、
+           也无法对应「#序号」这一既有约定（详情页 ID 就写作 #序号） */
+        var badge = '<span class="kbadge' + (isPt ? ' pt' : '') + '">' + (isPt ? '时间点' : '事件') + '</span>';
+        var cell = el('div', 'gv-lname',
+          dot +
+          '<span class="nm"><b>' + esc(t.name) + '</b>' +
+          '<span class="dt"><span class="sq">#' + (seqById[t.id] || '') + '</span>' + esc(ymdRange(t)) + badge + '</span></span>');
+        cell.addEventListener('click', function () { openDetail(t, true); });
+        lboxEl.appendChild(cell);
+        labelRowByTask[t.id] = cell;
       });
       lcntEl.textContent = vis.length;
     }
@@ -1524,7 +1565,7 @@
       document.body.style.overflow = '';
     }
 
-    /* ================= 提醒消息弹窗：截止不足一天的待办 ================= */
+    /* ================= 提醒消息弹窗：截止日期 = 今天的待办 ================= */
     var REM_KEY = 'mermaid-gantt.remDone.v1';
     function loadRemDone() {
       try { var a = JSON.parse(localStorage.getItem(REM_KEY)); return Array.isArray(a) ? a : []; }
@@ -1575,17 +1616,31 @@
       if (dl == null) return null;
       return dl - now.getTime();
     }
-    /* 收集：未完成、尚未过期、剩余未超24h 的待办，按最先截止排序 */
+    /* 提醒口径（v33 起）：**截止时间落在当天**，而不是「距当前不足 24 小时」。
+       为什么改：原口径以「此刻 + 24h」为右界，导致两类误判 ——
+         ① 今天 23:59 截止、此刻 00:10 → 剩余 23h49m 被收录（合理），但明天 00:30 截止、
+            此刻 01:00 的条目剩余 23h30m 也被收录，而它其实是「明天的事」；
+         ② 今天 09:00 截止、此刻 00:10 → 被收录，但同一天 09:00 截止、此刻 18:00 却因
+            「已过点」被剔除（同为「今天截止」，行为不一致）。
+       新口径 = 自然日相等（截止日 == 当天），语义稳定、与「今天该做什么」直接对应，
+       且与构建端 tools/build-deadlines.js 的 dueToday 同源。
+       唯一取舍：当天早于此刻的条目仍会列出（带「已过期」标记），
+       这是刻意的 —— 「今天到期」应当整天可见，而不是过点即消失。 */
+    function remDueToday(task, now) {
+      var end = task.end || task.start;
+      if (!end) return false;
+      return fmtYMD(end) === fmtYMD(now);
+    }
+    /* 收集：未完成、且截止日期 = 今天的待办，按截止时刻升序 */
     function remCollect(now) {
       var out = [];
       for (var i = 0; i < model.all.length; i++) {
         var t = model.all[i];
         if (t.done) continue;
-        var leftMs = remLeftMs(t, now);
-        if (leftMs == null || leftMs < 0 || leftMs > DAY) continue;
+        if (!remDueToday(t, now)) continue;
         out.push(t);
       }
-      out.sort(function (a, b) { return remLeftMs(a, now) - remLeftMs(b, now); });
+      out.sort(function (a, b) { return remDeadlineOf(a) - remDeadlineOf(b); });
       return out;
     }
     /* 弹窗容器惰性创建 */
@@ -1597,13 +1652,13 @@
         remPanel.innerHTML =
           '<button class="gv-rem-close" aria-label="关闭">✕</button>' +
           '<div class="gv-rem-head">' +
-          '  <span class="icon">🔔</span><h3>ddl 提醒</h3>' +
+          '  <span class="icon">🔔</span><h3>今日截止提醒</h3>' +
           '  <button class="gv-rem-clear" type="button">清除已完成</button>' +
           '</div>' +
           '<p class="gv-rem-sub" id="gv-rem-sub"></p>' +
           '<div class="gv-rem-list" id="gv-rem-list"></div>' +
           '<div class="gv-rem-done" id="gv-rem-done"></div>' +
-          '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部 · 时间取自编辑表单的日期/时刻组件，未填「时刻」按 00:00 / 23:59 计（带 ~ 标记）</div>' +
+          '<div class="gv-rem-foot">勾选 = 标记完成，自动折叠到底部 · 收录「截止日期 = 今天」的待办，时间取自编辑表单的日期/时刻组件（未填「时刻」按 00:00 / 23:59 计，带 ~ 标记）</div>' +
           '<div class="gv-rem-sys">' +
           '  <button type="button" class="gv-rem-btn" data-act="ics" title="下载 .ics：在 iPhone「文件」中打开即写入系统日历，截止前 30 分钟与到点各响一次">📅 加入系统日历</button>' +
           '  <button type="button" class="gv-rem-btn" data-act="alarm" title="唤起快捷指令「甘特图闹钟」：只对【今天开始】的条目，在【开始时刻前 15 分钟】各建一个闹钟，标签 = 「名称｜地点｜开始→结束时间」，在「时钟」App 中生成真正的系统闹钟">⏰ 同步系统闹钟</button>' +
@@ -1625,11 +1680,15 @@
       remDoneEl = remPanel.querySelector('#gv-rem-done');
       remFootEl = remPanel.querySelector('.gv-rem-foot');
     }
-    /* 截止文案：已过点=已到期；否则给出精确剩余时长（分钟级，如「剩 3 小时 12 分」） */
+    /* 截止文案：改为「当天截止」口径后，列表里会出现三种状态 ——
+       ① 已过点（当天更早的时刻）→ 明确「已过点」，不再用「已到期」这种歧义词；
+       ② 即将到来 → 精确剩余时长（分钟级，如「剩 3 小时 12 分」）；
+       ③ 当天较晚时刻 → 同样给剩余时长。
+       注意不再有「已过期」分支产生的「剩 -N」：截止日恒为今天，跨日过期条目不进列表。 */
     function remChip(t, now) {
       var left = remLeftMs(t, now);
       if (left == null) return '';
-      if (left <= 0) return '已到期';
+      if (left <= 0) return '已过点';
       var mins = Math.floor(left / 60000);
       var h = Math.floor(mins / 60), m2 = mins % 60;
       if (h <= 0) return '剩 ' + m2 + ' 分钟';
@@ -1678,10 +1737,10 @@
       list.forEach(function (t) { (doneIds.indexOf(t.id) >= 0 ? finished : pending).push(t); });
       var dateStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日';
       remSubEl.textContent = list.length
-        ? dateStr + ' · 有 ' + list.length + ' 项待办剩余不足一天（按最先截止排序）'
-        : dateStr + ' · 当前无截止不足一天的待办';
+        ? dateStr + ' · 今天截止的待办 ' + list.length + ' 项（按截止时刻排序）'
+        : dateStr + ' · 今天没有截止的待办';
       if (!pending.length && !finished.length) {
-        remListEl.innerHTML = '<div class="gv-rem-empty">🎉暂无即将截止的待办<br>继续保持</div>';
+        remListEl.innerHTML = '<div class="gv-rem-empty">🎉今天没有截止的待办<br>继续保持</div>';
         remDoneEl.innerHTML = '';
         remFootEl.style.visibility = 'hidden';
         return;
@@ -1809,25 +1868,21 @@
         }
       }, 1800);
     }
-    /* 导出用的清单：优先「当前提醒列表里未勾选完成」的项；为空则退化为未来 60 天内的未完成项 */
+    /* 导出用的清单（v33 起）：直接取「截止日期 = 今天」且未勾选完成的待办。
+       旧版会在列表为空时退化为「未来 60 天内未完成项」—— 那是为「不足 24h」口径做的兜底
+       （当天无临期项时给点东西导）；新口径下「今天没有截止项」本身就是正确答案，
+       导出空清单是正确的（不导任何事件），继续兜底会让用户误以为「今天有 60 天内的待办要处理」。 */
     function remExportList(now) {
       var doneIds = loadRemDone();
-      var list = remCollect(now).filter(function (t) { return doneIds.indexOf(t.id) < 0; });
-      if (list.length) return list;
-      var horizon = now.getTime() + 60 * DAY;
-      var dayStart = dateOnly(now).getTime();
-      return model.all.filter(function (t) {
-        if (t.done || !t.end) return false;
-        var dl = remDeadlineOf(t);
-        return dl != null && dl >= dayStart && dl <= horizon;
-      });
+      return remCollect(now).filter(function (t) { return doneIds.indexOf(t.id) < 0; });
     }
     /* 通道 C 真正能被建成闹钟的条目，判定与捷径（读 deadlines.json）完全一致：
        ①开始日期 = 今天（时钟闹钟没有「日期」维度，非今天的会被顺延到错误的日子响）
        ②显式填了开始时刻（未填时刻按 00:00 计 → 闹钟落到前一天 23:45，无意义）
        ③闹钟时刻尚未过点（已过点的会被顺延到明天响，捷径侧也会剔除）
-       注意：这里必须直接从全量任务取，**不能**复用「剩余不足一天」的提醒列表 ——
-       今天开始但截止还在 24 小时以外的活动，其闹钟仍然有效，却不在提醒列表里。 */
+       注意：这里必须直接从全量任务取，**不能**复用提醒列表 ——
+       v33 的提醒列表口径是「截止日期 = 今天」，而闹钟锚在**开始**时刻，
+       两者日期维度不同：今天 14:00 开始、9.12 截止的活动有有效闹钟，却不在提醒列表里。 */
     function remAlarmCandidates() {
       var today = fmtYMD(new Date());
       var nowMs = Date.now();
@@ -1888,10 +1943,19 @@
       });
       return prefix + (max + 1);
     }
-    function sectionOptions(cur) {
-      return model.sections.map(function (sec) {
-        return '<option value="' + esc(sec.name) + '"' + (sec.name === cur ? ' selected' : '') + '>' + esc(sec.name) + '</option>';
-      }).join('');
+    /* v33：表单取消「阶段」字段 → 目标 section 由这里自动决定，不再让用户选：
+         · 编辑既有条目 → 沿用原 section（既不移动条目，也不产生无意义的 gantt.md diff）
+         · 新增条目     → 归入 FALLBACK_SECTION（不存在时 serializeGantt 会按需创建）
+       为什么取消：阶段是「数据组织维度」而非「用户要填的业务属性」。同学关心的是
+       「这件事什么时候、要做什么」，把他不关心的容器分组塞进表单，既拖慢录入、
+       又给了误操作（把「收体检表」挪进「第四学期(推测)」）的机会。 */
+    function targetSectionName(task, isNew) {
+      if (!isNew && task) {
+        var s = secOfTask[task.id];
+        if (s && s.name) return s.name;
+        /* 编辑的条目已不属于任何已知 section（异常数据）→ 归入兜底区，避免它被写出后丢失 */
+      }
+      return (Admin && Admin.FALLBACK_SECTION) || '新增事项';
     }
     /* 基于当前 eventsData 构造新对象：changeEvent=null 删除，否则新增/覆盖 */
     function buildEvents(changeId, changeEvent) {
@@ -2125,7 +2189,7 @@
         !(pending.stepImgUploads && pending.stepImgUploads.length) &&
         !(pending.tipsImgUploads && pending.tipsImgUploads.length) &&
         !(pending.attUploads && pending.attUploads.length))) {
-        syncSaveBtn(); return Promise.resolve();
+        syncSaveBtn(); return Promise.resolve({ saved: false, empty: true });
       }
       var saveBtn = toolbar.querySelector('[data-act="save"]');
       if (saveBtn) { saveBtn.disabled = true; if (!opts.silent) saveBtn.textContent = '保存中…'; }
@@ -2297,11 +2361,22 @@
             toast('✅ 已保存同步到 GitHub（含 deadlines.json 重建），全班刷新即见。');
           }
         }
+        /* v33：把结果回传给调用方（handleSubmit / doDelete 的立即同步要用它决定提示什么） */
+        return { saved: true, kept: mergedKeep };
       }).catch(function (err) {
         if (saveBtn) saveBtn.disabled = false;
         syncSaveBtn();
         if (!opts.silent) { toast('❌ 保存失败：' + (err && err.message ? err.message : err)); alert('保存失败：' + (err && err.message ? err.message : err)); }
+        else if (opts.autoTriggered) {
+          /* v33：表单提交触发的**自动**同步失败必须让用户看见 ——
+             否则用户以为「点保存就已生效」，实际内容还挂在本地队列里（静默失败是最坏的体验）。
+             用 toast 而非 alert（不打断连续编辑），但一定出声。 */
+          toast('⚠️ 改动已存在本机，但同步 GitHub 失败：' + (err && err.message ? err.message : err) + '。稍后会自动重试，也可点「保存更改」手动重试。');
+          console.warn('[gantt] 表单提交触发的自动同步失败：', err && err.message ? err.message : err);
+        }
         else console.warn('[gantt] 自动同步失败：', err && err.message ? err.message : err);
+        /* 让调用方也能感知失败（不再吞掉） */
+        return { saved: false, error: err };
       });
     }
 
@@ -2313,7 +2388,8 @@
       var ev = opts.ev || null;
       var isNew = !!opts.isNew;
       var kind = task ? (task.milestone ? 'milestone' : 'normal') : 'normal';
-      var secName = task ? ((secOfTask[task.id] && secOfTask[task.id].name) || '') : model.sections[0].name;
+      /* v33：不再有「阶段」下拉，目标 section 由 targetSectionName 自动决定 */
+      var secName = targetSectionName(task, isNew);
       var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
       var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
       var startTStr = task ? hmOf(task.startTime) : '';
@@ -2336,7 +2412,6 @@
         '  <div class="f-row">' +
         '    <div class="f-col" style="flex:0 0 70px"><label>ID<input type="text" value="' + (isNew ? '#' + (model.all.length + 1) : '#' + (seqById[task.id] || '')) + '" disabled readonly style="background:#f1f5f9;color:#64748b;font-weight:600"></label></div>' +
         '    <div class="f-col" style="flex:2 1 260px"><label>待办事项名称<input type="text" name="name" required value="' + esc(task ? task.name : '') + '"></label></div>' +
-        '    <div class="f-col"><label>阶段<select name="section">' + sectionOptions(secName) + '</select></label></div>' +
         '  </div>' +
         '  <div class="f-row">' +
         '    <div class="f-col"><label>类型<select name="kind">' +
@@ -2598,7 +2673,6 @@
     function handleSubmit(opts, form) {
       var fd = new FormData(form);
       var name = String(fd.get('name') || '').trim();
-      var sectionName = String(fd.get('section') || '');
       var kind = String(fd.get('kind') || 'normal');
       var completed = String(fd.get('completed') || 'undone');
       var startStr = String(fd.get('start') || '');
@@ -2645,14 +2719,20 @@
       var id = task ? task.id : (isEvent ? genId('b') : (milestone ? genId('m') : genId('t')));
       var newTask = { name: name, id: id, start: start, end: end, startTime: startT, endTime: endT, milestone: milestone, crit: crit, done: done, active: active };
 
+      /* v33：目标 section 由 targetSectionName 决定（编辑→沿用原阶段；新增→兜底区）。
+         新 section 不在 model.sections 里时，把任务挂到 model.orphans，由 serializeGantt 补出该 section；
+         这样「新增到尚不存在的兜底区」第一次保存也能落地（不会被静默丢掉）。 */
+      var sectionName = targetSectionName(task, isNew);
+      var secExists = model.sections.some(function (s) { return s.name === sectionName; });
       var newModel = {
         title: model.title,
         sections: model.sections.map(function (sec) {
           var tasks = sec.tasks.filter(function (t) { return t.id !== (task ? task.id : null); });
-          if (sec.name === sectionName) tasks = tasks.concat([newTask]);
+          if (secExists && sec.name === sectionName) tasks = tasks.concat([newTask]);
           return { name: sec.name, tasks: tasks };
         })
       };
+      if (!secExists) newModel.orphans = [newTask];
 
       var newEvent = null;
       if (isEvent) {
@@ -2737,10 +2817,28 @@
           pendingPartial.attUploads = aups;
         }
       }
-      /* 本地暂存改动（不立即请求 GitHub API），点工具栏「保存更改」/每 3 分钟自动同步时统一写回 */
+      /* v33：本地暂存 + **立即同步**
+         用户要求「新增按钮弹窗点击保存后，应该触发立即同步」，不再只等 3 分钟自动同步。
+         管理员已登录 → 暂存后立刻静默 saveAll() 写回 GitHub（silent 避免与上面的原地重渲染重复刷新）；
+         未登录（只读访客）→ 维持纯本地暂存。
+         注意：同步成功后 pending 会被清空，这是正确语义（改动已进 GitHub，无需再挂本地队列）。 */
       savePending(pendingPartial);
+      touchModTs(id);   /* v33：记下「最近修改时间」，左侧事件列表据此把最新改动的条目排到最上面 */
       /* 原地重渲染（不整页刷新，避免退出全屏）：用刚暂存的数据重建左列 + 重绘 */
       reloadAfterSave(Admin.serializeGantt(newModel), needEvents ? newEvents : eventsData);
+      if (G.GanttAdmin && G.GanttAdmin.isLoggedIn && G.GanttAdmin.isLoggedIn()) {
+        /* silent：写回成功后不再 reloadAfterSave（上面已做）；autoTriggered 让失败一定出声 */
+        saveAll({ silent: true, autoTriggered: true }).then(function (r) {
+          if (r && r.saved) {
+            toast((r.kept && r.kept.length)
+              ? '✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」并同步；保留远端新增的 ' + r.kept.join('、') + ' 条执行说明（未丢失）'
+              : '✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」并同步到 GitHub，全班刷新即见。');
+          }
+          /* 失败分支已在 saveAll 内部 toast，这里不重复 */
+        });
+      } else {
+        toast('已暂存到本地（当前未登录管理员，需登录后点「保存更改」写回 GitHub）');
+      }
     }
 
     function confirmDelete(task) {
@@ -2765,7 +2863,7 @@
         })
       };
       var msg = 'delete: ' + task.id + ' ' + task.name;
-      /* 本地暂存删除（不立即请求 GitHub API），点工具栏「保存更改」后统一写回。
+      /* v33：本地暂存 + **立即同步**（同 handleSubmit）。
          delIds 记账：只有在这里登记过的 id，合并写回时才允许从远端 events.js 消失 */
       savePending({
         ganttCode: Admin.serializeGantt(newModel),
@@ -2773,8 +2871,20 @@
         delIds: [task.id],
         desc: msg
       });
+      touchModTs(task.id);   /* v33：删除也刷新修改时间，保证列表排序稳定（条目已移除，仅留痕） */
       /* 原地重渲染（不整页刷新，避免退出全屏） */
       reloadAfterSave(Admin.serializeGantt(newModel), ev ? buildEvents(task.id, null) : eventsData);
+      if (G.GanttAdmin && G.GanttAdmin.isLoggedIn && G.GanttAdmin.isLoggedIn()) {
+        saveAll({ silent: true, autoTriggered: true }).then(function (r) {
+          if (r && r.saved) {
+            toast((r.kept && r.kept.length)
+              ? '✅ 已删除「' + task.name + '」并同步；保留远端新增的 ' + r.kept.join('、') + ' 条执行说明（未丢失）'
+              : '✅ 已删除「' + task.name + '」并同步到 GitHub，全班刷新即见。');
+          }
+        });
+      } else {
+        toast('已暂存到本地（当前未登录管理员，需登录后点「保存更改」写回 GitHub）');
+      }
     }
 
     /* 首次定位：今日（今日超出图范围则定位到数据末端） */
@@ -2821,7 +2931,15 @@
       toggleLabels: function () { setLabelsCollapsed(!labelsEl.classList.contains('collapsed')); },
       setViewMode: setViewMode,          /* v5：右上角按钮调用（'normal'/'land'/'auto'） */
       getViewMode: function () { return viewOverride || (isLand ? 'land' : 'normal'); },
-      onLand: function (fn) { onLand = fn; } /* v6：整页向右旋转 90° 回调（index.html 挂载） */
+      onLand: function (fn) { onLand = fn; }, /* v6：整页向右旋转 90° 回调（index.html 挂载） */
+      /* v33：只读自检口 —— 暴露「当前渲染的任务清单（id + 名称 + 是否时间点）」。
+         仅供 tools/verify-ui.js 端到端自检做 name→id 反查（验证左侧列表「最新修改在最上面」的排序），
+         不参与任何渲染或写回；返回浅拷贝，外部改不动内部 model。 */
+      debugTasks: function () {
+        return model.all.map(function (t) {
+          return { id: t.id, name: t.name, isPoint: !!(t.milestone || t.point) };
+        });
+      }
     };
   }
 

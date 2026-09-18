@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>读研甘特图（软件2603班专属） · 北交软工2026级专硕</title>
 <link rel="icon" href="data:,">
-<meta name="description" content="读研甘特图（软件2603班专属）：北交大2026级软件工程两年制专硕入学到毕业时间线。事件标题与 ddl 提醒精确到分钟；支持年/月切换、回到今天、缩放（桌面 Ctrl+滚轮）、Ctrl+S 保存同步；点击任务可查看执行说明。今日两条红线：当前时刻（实线）与今日 24:00（虚线）。ddl 提醒可一键导出系统日历（.ics）或唤起快捷指令创建系统闹钟。">
+<meta name="description" content="读研甘特图（软件2603班专属）：北交大2026级软件工程两年制专硕入学到毕业时间线。事件标题与今日截止提醒精确到分钟；支持年/月切换、回到今天、缩放（桌面 Ctrl+滚轮）、Ctrl+S 保存同步；点击任务可查看执行说明。今日两条红线：当前时刻（实线）与今日 24:00（虚线）。今日截止提醒可一键导出系统日历（.ics）或唤起快捷指令创建系统闹钟。左侧事件列表把最新修改排在最上面，可上下滚动。">
 <!-- 字体自托管（原为 fonts.googleapis.com 外链）：该外链是渲染阻塞的，且中国大陆访问
      Google Fonts 会被阻断 → 首屏可能长时间空白。本地同源加载，零外链、可离线。详见 fonts/fonts.css -->
 <link rel="stylesheet" href="./fonts/fonts.css?v=1">
@@ -154,9 +154,10 @@
       ④ <b>看详情</b>：点击 <b>任务条 / ◆ 节点 / 标题文字 / 左侧名称</b> 弹出该事件执行说明（详情、负责人、时间地点、步骤提醒）<br>
       ⑤ <b>视图</b>：右上角 <b>⇄ 横屏视图</b> 切换 常规视图 ↔ 整页向右旋转 90°（整个网页旋转，手机横着看更清晰）；手机横屏时自动切换<br>
       ⑥ <b>定位</b>：点击左侧事件名称 → 自动滚动到该事件日期并高亮闪烁<br>
-      ⑦ <b>ddl 提醒</b>：工具栏 <b>🔔 提醒</b> 列出「截止不足一天」的待办，时间精确到分钟；弹窗底部可
+      ⑦ <b>今日截止提醒</b>：工具栏 <b>🔔 提醒</b> 列出「<b>截止日期就在今天</b>」的全部待办（按截止时刻从早到晚排序），时间精确到分钟；弹窗底部可
       <b>📅 加入系统日历</b>（.ics，到点由系统日历闹铃响，能穿透静音）、<b>⏰ 同步系统闹钟</b>（只对<b>今天开始</b>的条目，各建一个<b>开始前 15 分钟</b>的闹钟，标签 = <b>名称｜地点｜开始→结束时间</b>）、<b>📋 复制清单</b>、<b>🔗 订阅地址</b><br>
-      ⑧ <b>保存同步</b>：管理员登录后按 <b>Ctrl + S</b>（Mac 为 ⌘ + S）= 点「💾 保存更改」，把本地改动一次性写回仓库<br>
+      ⑧ <b>保存同步</b>：管理员登录后，在弹窗里点「保存」即<b>立即写回仓库</b>（无需再点工具栏按钮）；也可按 <b>Ctrl + S</b>（Mac 为 ⌘ + S）= 点「💾 保存更改」手动同步。未登录时改动只暂存在本机<br>
+      ⑨ <b>左侧事件列表</b>：<b>最新修改</b>的事件/时间点自动排在<b>最上面</b>（每条带 <b>#序号</b> 与 <b>事件/时间点</b> 角标）；条目多时列表内可<b>上下滚动</b><br>
       红色竖线共 <b>2 条</b>：实线 = <b>当前时刻</b>（每分钟自动移动），虚线 = <b>今日 24:00</b>，随<b>打开当天</b>自动更新
     </div>
   </div>
@@ -169,7 +170,7 @@
   <div class="admin-card">
     <button class="admin-close" id="adminClose" aria-label="关闭">✕</button>
     <h3>🔒 管理员登录</h3>
-    <p class="admin-sub">输入 GitHub 个人访问令牌（PAT），登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与执行说明；改动先暂存在本地，点工具栏「<strong>💾 保存更改</strong>」后统一写回仓库并对全班生效。<br>令牌仅保存在本机浏览器，不会写入代码或仓库。</p>
+    <p class="admin-sub">输入 GitHub 个人访问令牌（PAT），登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与执行说明；新增或编辑在弹窗里点「保存」后会<strong>立即写回仓库</strong>并对全班生效（未登录时改动只暂存在本机）。<br>令牌仅保存在本机浏览器，不会写入代码或仓库。</p>
     <label>GitHub 令牌（Personal Access Token）
       <input type="password" id="adminToken" placeholder="github_pat_... 或 ghp_..." autocomplete="off">
     </label>
@@ -265,6 +266,8 @@
     if (window.GanttViewer && GanttViewer.mount) {
       try {
         gvViewer = GanttViewer.mount(holder, code, events);
+        // v33：只读自检口 —— 供 tools/verify-ui.js 做 name→id 反查（左侧列表排序断言用）
+        window.__ganttViewer = gvViewer;
         if (gvViewer && gvViewer.onLand) {
           gvViewer.onLand(function (isLandView) { gLandscape = !!isLandView; applyPageLand(); });
         }

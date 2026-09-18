@@ -113,6 +113,36 @@ model.all.forEach(t => {
 });
 check(fieldDiff === 0, 'serializeGantt → parse 字段完全一致（' + model.all.length + ' 任务，无丢失/类型/日期漂移）');
 
+/* ---- 6b. v33：取消「阶段」字段后的兜底 section 行为 ---- */
+console.log('[6b] v33 兜底 section（新增条目不再选阶段）');
+const FALLBACK = Admin.FALLBACK_SECTION;
+check(typeof FALLBACK === 'string' && FALLBACK.length > 0, 'admin.js 导出兜底 section 名（「' + FALLBACK + '」）');
+/* 基线：无孤立任务时**不得**凭空造出空 section（这是本次修掉的真实 bug：每次保存 gantt.md 都被写脏） */
+const serPlain = Admin.serializeGantt(model);
+const mPlain = Parser.parse(serPlain);
+check(mPlain.sections.length === model.sections.length,
+  '无孤立任务时不新增空 section（' + model.sections.length + ' → ' + mPlain.sections.length + '）');
+const mPlain2 = Parser.parse(Admin.serializeGantt(mPlain));
+check(mPlain2.sections.length === mPlain.sections.length,
+  'serialize → parse → serialize 幂等（section 数稳定在 ' + mPlain2.sections.length + '）');
+/* 有孤立任务时必须补出兜底 section，且任务不丢 —— 「新增了但图上没有」是本次改动的高危场景 */
+const orphanTask = { name: '测试新增条目', id: 'zzTEST', start: new Date(2026, 8, 20), end: new Date(2026, 8, 20), startTime: '', endTime: '', milestone: false, crit: false, done: false, active: false };
+const mOrphan = { title: model.title, sections: model.sections, orphans: [orphanTask] };
+const mOrphan2 = Parser.parse(Admin.serializeGantt(mOrphan));
+check(mOrphan2.sections.length === model.sections.length + 1,
+  '有孤立任务时补出 1 个兜底 section（' + model.sections.length + ' → ' + mOrphan2.sections.length + '）');
+check(!!mOrphan2.byId('zzTEST'), '孤立任务被写进产物且可被解析回来（不会静默丢失）');
+check(mOrphan2.sections[mOrphan2.sections.length - 1].name === FALLBACK,
+  '兜底 section 追加在**末尾**（不打乱既有顺序，避免无意义 diff）');
+/* 兜底 section 已存在时不再重复追加 */
+const mOrphan3 = Parser.parse(Admin.serializeGantt({
+  title: model.title,
+  sections: model.sections.concat([{ name: FALLBACK, tasks: [orphanTask] }]),
+  orphans: [orphanTask]
+}));
+check(mOrphan3.sections.filter(s => s.name === FALLBACK).length === 1,
+  '兜底 section 已存在时不重复追加（仍为 1 个）');
+
 const tmpPath = path.join(ROOT, 'test', '_events_tmp.js');
 fs.writeFileSync(tmpPath, Admin.serializeEvents(Events), 'utf8');
 const Events2 = require(tmpPath);
@@ -178,11 +208,20 @@ check(Viewer.hmOf('9:5') === '09:05' && Viewer.hmOf('') === '', '时刻归一：
 /* ---- 9. 生成物口径一致（deadlines.json ↔ deadlines.ics） ---- */
 console.log('[9] 生成物口径一致');
 const dj = JSON.parse(fs.readFileSync(path.join(ROOT, 'deadlines.json'), 'utf8'));
-check(dj.schema === 4, 'deadlines.json schema = 4（通道 C 新增 alarmItems / alarmLabelSep，alarmLabel 含地点）');
-const w25 = dj.items.filter(i => i.id === 't25')[0];
-check(!!w25 && w25.time === '17:00', '截止时刻精确到分钟 time=' + (w25 && w25.time));
-check(!!w25 && w25.window === '9.10 14:00 → 9.10 17:00', '起止文案分钟级 window=' + (w25 && w25.window));
-check(!!w25 && Date.parse(w25.dueAt) === Date.parse('2026-09-10T09:00:00Z'), 'dueAt = 北京时间 17:00 的绝对时刻');
+check(dj.schema === 5, 'deadlines.json schema = 5（v33：提醒口径改为「截止时间落在当天」，within24h → dueToday）');
+/* 样本改用「窗口内任一填了时刻的条目」——原来钉死在 t25（9.10）上，
+   9.10 一过就滚出 180 天窗口 → 断言变成"数据过期"式假红（与 b2 / cSpan 同一类问题）。
+   期望值全部从条目自身推出来，不写死具体时刻。 */
+const w25 = dj.items.filter(i => /^\d{2}:\d{2}$/.test(i.time || ''))[0];
+check(!!w25, '窗口内存在精确到分钟的截止时刻的条目（' + (w25 ? w25.id + ' time=' + w25.time : '无') + '）');
+if (w25) {
+  check(!!w25.window && /\d{1,2}\.\d{1,2} \d{2}:\d{2} → \d{1,2}\.\d{1,2} \d{2}:\d{2}/.test(w25.window),
+    '起止文案分钟级 window=' + w25.window);
+  /* dueAt 必须是「到期日 + 到期时刻」按北京时间（UTC+8）折算出的绝对时刻 */
+  const expDueAt = Date.parse(w25.due + 'T' + w25.time + ':00+08:00');
+  check(Date.parse(w25.dueAt) === expDueAt,
+    'dueAt = 到期日 ' + w25.due + ' ' + w25.time + '（北京时间）的绝对时刻（实际 ' + w25.dueAt + '）');
+}
 /* b2 的日期组件口径（数据侧，与时间无关） */
 const b2T = model.byId('b2');
 check(!!b2T && Parser.fmt(b2T.end) === '2026-09-09',
@@ -200,6 +239,44 @@ if (fs.existsSync(icsPath)) {
   check(nEv >= dj.count - 1, 'ics 事件数 ≥ 提醒窗口条目数（' + nEv + ' vs ' + dj.count + '）');
   check(nEv === (icsTxt.match(/END:VEVENT/g) || []).length, 'VEVENT 开闭标签配平');
   check((icsTxt.match(/BEGIN:VALARM/g) || []).length === nEv * 2, '每条事件恰好 2 个 VALARM');
+}
+
+/* ---- 9a. v33 提醒口径：从「距截止不足 24 小时」改为「截止日期 = 当天」 ---- */
+console.log('[9a] v33 提醒口径（截止落在当天）');
+check(dj.schema === 5, 'schema 升到 5（口径变更必须版本化，避免旧缓存误读）');
+check(dj.within24h === undefined, '已移除旧的 within24h 字段（旧口径不再对外暴露）');
+check(dj.within24hText === undefined, '已移除旧的 within24hText 字段');
+check(typeof dj.dueTodayCount === 'number', '新增 dueTodayCount 计数（当前 ' + dj.dueTodayCount + '）');
+check(typeof dj.dueTodayText === 'string' && dj.dueTodayText.length > 0,
+  '新增 dueTodayText 文案（「' + dj.dueTodayText + '」）');
+/* 每条 item 都必须带 dueToday 布尔位（网页端 remDueToday 与构建端同口径的前提） */
+check(dj.items.every(i => typeof i.dueToday === 'boolean'),
+  '所有 items 均带 dueToday 布尔位（' + dj.items.length + ' 条）');
+/* dueToday 子集必须与「due 日期 = 今天」严格等价 —— 这是新口径的定义式，
+   只要构建端算错（比如还用 hoursLeft<24）这条就会立刻红 */
+function ymdOfIso(s) {
+  /* dueAt 是 ISO 绝对时刻（含 Z），换算到北京时间（UTC+8）后取日期 */
+  const d = new Date(new Date(s).getTime() + 8 * 3600 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+const todayStr = ymdOfIso(new Date().toISOString());
+const expectToday = dj.items.filter(i => i.due === todayStr).map(i => i.id).sort();
+const gotToday = dj.items.filter(i => i.dueToday).map(i => i.id).sort();
+check(expectToday.join(',') === gotToday.join(','),
+  'dueToday 子集 ≡「截止日期 = 今天」（期望 [' + expectToday.join(',') + ']，实际 [' + gotToday.join(',') + ']）');
+check(dj.dueTodayCount === gotToday.length,
+  'dueTodayCount 与 dueToday 条目数一致（' + dj.dueTodayCount + ' vs ' + gotToday.length + '）');
+/* 反向断言：确有「不足 24 小时但不落在今天」的条目时，它必须**不在** dueToday 里 ——
+   这正是新口径与旧口径的分水岭。若无此样本则跳过（数据过期导致的空样本不是回归）。 */
+const nearButNotToday = dj.items.filter(i => {
+  const ms = Date.parse(i.dueAt) - Date.now();
+  return ms > 0 && ms < 24 * 3600 * 1000 && i.due !== todayStr;
+});
+if (nearButNotToday.length) {
+  check(!nearButNotToday.some(i => i.dueToday),
+    '不足 24 小时但截止日不在今天的条目已排除（' + nearButNotToday.map(i => i.id).join(',') + '）');
+} else {
+  console.log('   · 跳过「不足 24h 但非今天」反向断言（当前无此样本）');
 }
 
 /* ---- 9b. 课程表条目（v28 起）进入待办提醒链路 ---- */
@@ -262,33 +339,76 @@ const lMis = dj.items.filter(i => {
   return exp !== i.alarmLabel;
 });
 check(lMis.length === 0, '闹钟标签两端一致（名称｜地点｜起止，不一致：' + lMis.map(i => i.id).join(',') + '）');
-const c25 = dj.items.filter(i => i.id === 't25')[0];
-check(!!c25 && c25.alarmTime === '13:45', '开始前 15 分钟：t25 14:00 开始 → 闹钟 ' + (c25 && c25.alarmTime));
-check(!!c25 && Date.parse(c25.alarmAt) === Date.parse(c25.startAt) - 15 * 60000,
-  'alarmAt = startAt − 15 分钟（绝对时刻，含时区一致）');
-check(!!c25 && c25.alarmLabel === '文艺汇演领票｜9.10 14:00 → 9.10 17:00',
-  'alarmLabel =「名称｜起止日期时间」（t25 无地点，实际「' + (c25 && c25.alarmLabel) + '」）');
-const cB7 = dj.items.filter(i => i.id === 'b7')[0];
-/* 期望值从「条目自身 + events 数据」推出来，不把时刻写死在断言里（管理员改时间不该导致假红） */
-const expB7 = [Events.b7.short, Events.b7.where, Viewer.alarmWhenOf(model.byId('b7'))].filter(Boolean).join('｜');
-check(!!cB7 && cB7.alarmLabel === expB7,
-  '标签 = 名称｜地点｜起止（实际「' + (cB7 && cB7.alarmLabel) + '」）');
+/* 「开始前 15 分钟」的验算：取窗口内任一「已填开始时刻」的条目标本。
+   原断言钉死 t25（9.10 14:00），t25 滚出窗口后必然 red —— 那是数据过期，不是口径回归。
+   这里改为「任取一条 → 反推期望闹钟」，口径本身（−15 分钟）才是要守的东西。 */
+const c25 = dj.items.filter(i => /^\d{2}:\d{2}$/.test(i.alarmTime || ''))[0];
+check(!!c25, '窗口内存在带精确闹钟时刻的条目（' + (c25 ? c25.id + ' alarmTime=' + c25.alarmTime : '无') + '）');
+if (c25) {
+  /* 期望闹钟 = 开始时刻 − 15 分钟（跨零点自动借位），与构建端 alarmTime 同源可验 */
+  const [sh, sm] = c25.startTime.split(':').map(Number);
+  const t = (sh * 60 + sm - 15 + 1440) % 1440;
+  const expAlarm = String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+  check(c25.alarmTime === expAlarm,
+    '开始前 15 分钟：' + c25.id + ' ' + c25.startTime + ' 开始 → 闹钟 ' + c25.alarmTime + '（期望 ' + expAlarm + '）');
+  check(Date.parse(c25.alarmAt) === Date.parse(c25.startAt) - 15 * 60000,
+    'alarmAt = startAt − 15 分钟（绝对时刻，含时区一致）');
+  /* 标签 = 名称｜地点｜起止（无地点时省略该段）——期望值从条目自身推出 */
+  const expLabel = [c25.name, c25.where, Viewer.alarmWhenOf(model.byId(c25.id))].filter(Boolean).join('｜');
+  check(c25.alarmLabel === expLabel,
+    'alarmLabel =「名称｜地点｜起止日期时间」（' + c25.id + ' 实际「' + c25.alarmLabel + '」）');
+}
+/* 带地点条目的样本同样改为「任取」：地点段落是通道 C 的关键信息，不能因 b7 出窗就失去覆盖。
+   兜底：窗口内一条带地点的都没有时，直接用 events 数据自校验标签拼装规则（不依赖窗口）。 */
+const cWhere = dj.items.filter(i => i.where)[0];
+if (cWhere) {
+  const expWL = [cWhere.name, cWhere.where, Viewer.alarmWhenOf(model.byId(cWhere.id))].filter(Boolean).join('｜');
+  check(cWhere.alarmLabel === expWL,
+    '标签 = 名称｜地点｜起止（' + cWhere.id + ' 实际「' + cWhere.alarmLabel + '」）');
+} else {
+  const anyEvKey = Object.keys(Events).filter(k => k !== '_roles' && Events[k] && Events[k].where && model.byId(k))[0];
+  check(!!anyEvKey,
+    '窗口内无带地点条目 → 回落到 events 数据校验标签规则（样本 ' + (anyEvKey || 'events 中亦无带地点条目') + '）');
+  if (anyEvKey) {
+    const t2 = model.byId(anyEvKey);
+    const expWL2 = [Events[anyEvKey].short || t2.name, Events[anyEvKey].where, Viewer.alarmWhenOf(t2)].filter(Boolean).join('｜');
+    check(expWL2.indexOf('｜' + Events[anyEvKey].where + '｜') > 0,
+      '标签拼装规则：名称｜地点｜起止（' + anyEvKey + ' → 「' + expWL2 + '」）');
+  }
+}
 const sameAlarm = { start: new Date(2026, 8, 11), end: new Date(2026, 8, 11), startTime: '18:45', endTime: '18:45' };
 check(Viewer.alarmWhenOf(sameAlarm) === '9.11 18:45',
   'alarmWhenOf：起止同刻只显示一次时间（实际「' + Viewer.alarmWhenOf(sameAlarm) + '」）');
 check(dj.items.filter(i => i.where).every(i => i.alarmLabel.indexOf('｜' + i.where + '｜') > 0),
   '凡有地点的条目，标签中必含「｜地点｜」段（' + dj.items.filter(i => i.where).length + ' 条有地点）');
 /* 非空断言：上面那条「凡有地点…」在一条地点都没有时会**空过**，等于没测。
-   2026-09-10 正是「b7 详情被整份写回覆盖 → where 变空 → 标签静默少一段」，
-   所以这里额外钉住「确实有带地点的条目」且「b7 的地点出现在标签里」。 */
+   2026-09-10 正是「b7 详情被整份写回覆盖 → where 变空 → 标签静默少一段」。
+   地点的**数据源**（events.js）不受 180 天窗口影响，所以这里改成对 events 数据做非空校验——
+   窗口内没有带地点条目时不再假红，但「events 里确实有地点」这条硬要求始终成立。 */
 const withWhere = dj.items.filter(i => i.where);
-check(withWhere.length > 0, '数据里确实存在带地点的条目（' + withWhere.length + ' 条：' + withWhere.map(i => i.id).join(',') + '）');
+const evWithWhere = Object.keys(Events).filter(k => k !== '_roles' && Events[k] && Events[k].where);
+check(evWithWhere.length > 0, 'events.js 数据里确实存在带地点的条目（' + evWithWhere.length + ' 条：' + evWithWhere.join(',') + '）');
+check(Events.b7 && Events.b7.where === '主校区西操场',
+  'b7 的地点未被丢失（where = ' + (Events.b7 && JSON.stringify(Events.b7.where)) + '）');
+/* b7 若仍在提醒窗口内，标签必须带上地点段；出窗则跳过（数据过期不是回归） */
 const b7rec = dj.items.filter(i => i.id === 'b7')[0];
-check(!!b7rec && b7rec.where === '主校区西操场', 'b7 的地点未被丢失（where = ' + (b7rec && JSON.stringify(b7rec.where)) + '）');
-check(!!b7rec && b7rec.alarmLabel.indexOf('主校区西操场') > 0,
-  'b7 的闹钟标签含地点段（实际「' + (b7rec && b7rec.alarmLabel) + '」）');
-const cM12 = dj.items.filter(i => i.id === 'm12')[0];
-check(!!cM12 && cM12.alarmTime === '12:45', '时间点同理：m12 13:00 → 闹钟 ' + (cM12 && cM12.alarmTime));
+if (b7rec) {
+  check(b7rec.where === '主校区西操场' && b7rec.alarmLabel.indexOf('主校区西操场') > 0,
+    'b7 在窗口内：地点未丢且闹钟标签含地点段（实际「' + b7rec.alarmLabel + '」）');
+} else {
+  console.log('   · 跳过 b7 窗口内标签断言（b7 已滚出 ' + dj.windowDays + ' 天窗口；数据侧已由上面两条守住）');
+}
+/* 时间点同理：取窗口内任一「带精确闹钟时刻的时间点」 */
+const cM12 = dj.items.filter(i => i.kind === 'milestone' && /^\d{2}:\d{2}$/.test(i.alarmTime || ''))[0];
+if (cM12) {
+  const [mh, mm] = cM12.startTime.split(':').map(Number);
+  const mt = (mh * 60 + mm - 15 + 1440) % 1440;
+  const expM = String(Math.floor(mt / 60)).padStart(2, '0') + ':' + String(mt % 60).padStart(2, '0');
+  check(cM12.alarmTime === expM,
+    '时间点同理：' + cM12.id + ' ' + cM12.startTime + ' → 闹钟 ' + cM12.alarmTime + '（期望 ' + expM + '）');
+} else {
+  console.log('   · 跳过时间点闹钟断言（窗口内无带精确时刻的时间点）');
+}
 check(dj.items.every(i => i.alarmLabel.indexOf(i.name + '｜') === 0), 'alarmLabel 以「名称｜」开头');
 /* 通道 C 的输入集合：只含「今天开始 + 显式填了开始时刻」的条目 */
 const alarmIds = dj.alarmItems.map(i => i.id);
@@ -312,9 +432,30 @@ if (cSpan) {
   check(dj.items.every(i => i.startDaysLeft === i.daysLeft),
     '窗口内全为同日条目 → startDaysLeft === daysLeft（' + dj.items.length + ' 条）');
 }
+/* 「未填开始时刻 → 不建闹钟」：窗口内可能一条这样的样本都没有（恰巧全填了时刻）。
+   样本不存在时不能假红 —— 改为用**数据侧**（gantt.md 全量任务）构造样本验证口径，
+   这样即使在窗口空样本的日期也始终有覆盖。 */
 const cNotExact = dj.items.filter(i => i.startExact === false)[0];
-check(!!cNotExact && cNotExact.alarmExact === false,
-  '未填开始时刻 → alarmExact=false（' + (cNotExact && cNotExact.id) + '，该条不应建闹钟）');
+if (cNotExact) {
+  check(cNotExact.alarmExact === false,
+    '未填开始时刻 → alarmExact=false（' + cNotExact.id + '，该条不应建闹钟）');
+} else {
+  /* 从全量 model 里找一条「未填开始时刻」的任务，验真正的建闹钟闸门。
+     注意：alarmHMOf 对未填时刻的条目**仍会算出一个时刻**（startHMOf 有默认语义回落），
+     所以「不建闹钟」不是靠 alarmHMOf 为空拦的，而是靠 startExact/alarmExact 这个显式闸门。
+     这里就验这道闸门：未填 → startExact=false → alarmExact=false → 不进 alarmItems。 */
+  const noExact = model.all.filter(t => !t.startTime)[0];
+  check(!!noExact,
+    '窗口内无未填时刻样本 → 回落到全量数据校验（样本 ' + (noExact ? noExact.id : '无') + '）');
+  if (noExact) {
+    /* 用构建端同款口径重算 startExact：显式填写了 'HH:mm' 才算 exact */
+    const exact = /^\d{2}:\d{2}$/.test(noExact.startTime || '');
+    check(exact === false,
+      '未填开始时刻的条目 startExact=false（' + noExact.id + ' startTime=' + JSON.stringify(noExact.startTime) + '）');
+    check(!dj.alarmItems.some(i => i.id === noExact.id) || dj.items.filter(i => i.id === noExact.id).length === 0,
+      '该条目（若在窗口内）不会因未填时刻而被建闹钟（' + noExact.id + '）');
+  }
+}
 check(!dj.alarmItems.some(i => i.alarmExact === false), '未填开始时刻的条目不会进入 alarmItems');
 check(dj.items.every(i => i.alarmExact === i.startExact), 'alarmExact 与 startExact 同源');
 /* 跨零点：开始 00:05 → 闹钟落在前一天 23:50，靠 Date 自动跨日而不是手工借位 */
@@ -376,8 +517,12 @@ console.log('[13] 合并写回护栏（整份覆盖 → 合并）');
 const blocks = Admin.blocksOf(realSrc);
 const bkB = Object.keys(blocks).filter(k => /^b\d+$/.test(k)).sort();
 const bkK = Object.keys(blocks).filter(k => /^k\d+$/.test(k)).sort();
-check(bkB.join(',') === 'b1,b2,b3,b4,b5,b6,b7' && bkK.length === 12,
+/* 期望值从 events.js 自身推导（原先写死 'b1..b7'，远端新增 b8 后立刻假红 —— 数据增长不是回归） */
+const evKeysExpect = Object.keys(Events).filter(k => /^b\d+$/.test(k)).sort();
+check(bkB.join(',') === evKeysExpect.join(',') && bkK.length === 12,
   'blocksOf 切出全部条目的原文块（班务 ' + bkB.length + ' 条 + 课表 ' + bkK.length + ' 条）');
+check(bkB.length === evKeysExpect.length && bkB.length >= 7,
+  '班务块数量与 events.js 一致（' + bkB.length + ' 条）');
 check(blocks.b7.split('\n')[0].trim() === 'b7: {', '块首是条目行（' + blocks.b7.split('\n')[0].trim() + '）');
 check(blocks.b7.split('\n').pop().trim() === '},', '块尾是结束行「},」，切分边界正确');
 check(blocks.b7.indexOf('主校区西操场') > 0, 'b7 的原文块里带着地点');

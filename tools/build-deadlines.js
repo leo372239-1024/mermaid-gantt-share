@@ -13,6 +13,10 @@
  *   node tools/build-deadlines.js                  # 使用默认窗口（30 天）
  *   DEADLINE_WINDOW_DAYS=60 node tools/build-deadlines.js
  *
+ * 提醒口径（v33）：网页端「🔔 提醒」收录「**截止日期 = 今天**」的待办。
+ *   本脚本为此在每条记录上输出 dueToday 布尔字段，并按它汇总 dueTodayCount / dueTodayText；
+ *   两端必须同源（网页端见 js/viewer.js 的 remDueToday），不得各算一套。
+ *
  * 时区：统一以北京时间（UTC+8）为准。GitHub Actions 运行在 UTC 环境下，若直接用
  *   本地时间取「今天」会整体偏移 8 小时，导致临期任务漏报或错报，因此这里所有日期
  *   运算都显式走 CST 换算。
@@ -245,6 +249,14 @@ function build() {
       alarmExact: sh.exact,
       /* daysLeft 按自然日计算，同一天内反复读取结果恒定 —— 判断「是否该提醒」请优先用它 */
       daysLeft: daysLeft,
+      /* dueToday（v33）：截止日期是否就是「今天」（自然日相等）。
+         网页端「🔔 提醒」面板的收录判据 = 这个字段为 true（口径见 js/viewer.js 的 remDueToday）。
+         为什么用「当天截止」而不是原来的「距当前不足 24 小时」：
+           · 「不足 24h」以此刻为右界 → 明天 00:30 截止、此刻 01:00 的条目剩余 23h30m 会被误收
+             （它其实是明天的任务）；同一天 09:00 截止的条目在 00:10 被收录、在 18:00 被剔除，
+             同为「今天截止」却行为不一致。
+           · 「当天截止」= 自然日相等，语义稳定，与「今天该做什么」直接对应，且跨零点自然切换。 */
+      dueToday: daysLeft === 0,
       /* hoursLeft 是构建时刻的快照，数小时后读取会偏小，仅适合当次即时判断 */
       hoursLeft: hoursLeft,
       overdue: overdue,
@@ -268,7 +280,9 @@ function build() {
     return a.name < b.name ? -1 : 1;
   });
 
-  const within24hItems = items.filter(function (it) { return it.hoursLeft <= 24; });
+  /* 今天截止的条目（v33 起取代原 within24h：口径由「距此刻不足 24h」改为「截止日期 = 今天」，
+     与网页端「🔔 提醒」面板的收录集合完全一致 —— 两端不许各算一套）。 */
+  const dueTodayItems = items.filter(function (it) { return it.dueToday; });
 
   /* 通道 C 的输入集合：只含「今天开始 + 显式填了开始时刻」的条目。
      时钟闹钟没有日期维度，非今天的条目会在今天同一时刻误响，所以必须由构建期先筛掉。
@@ -279,7 +293,7 @@ function build() {
   const alarmItems = items.filter(function (it) { return it.startDaysLeft === 0 && it.alarmExact; });
 
   const out = {
-    schema: 4,
+    schema: 5,
     generatedAt: new Date(nowMs).toISOString(),
     timezone: 'Asia/Shanghai',
     windowDays: WINDOW_DAYS,
@@ -292,10 +306,11 @@ function build() {
     count: items.length,
 
     /* ⚠️ 以下字段是「构建时刻」的快照，只在生成的瞬间准确。
-       若消费方是在几小时后才读取，请改用 daysLeft（自然日，一天内稳定）
+       若消费方是在几小时后才读取，请改用 daysLeft / dueToday（自然日，一天内稳定）
        或 dueAt（绝对时刻，可自行与当前时间求差）来做判断。 */
-    within24h: within24hItems.length,
-    within24hText: within24hItems.map(function (it) { return it.alert; }).join('\n'),
+    /* 今天截止的条目：网页端提醒面板的同一集合（v33 起替代原 within24h） */
+    dueTodayCount: dueTodayItems.length,
+    dueTodayText: dueTodayItems.map(function (it) { return it.alert; }).join('\n'),
 
     /* 通道 C 专用：今天该建闹钟的条目（与 items 同结构，是 items 的子集） */
     alarmCount: alarmItems.length,
@@ -354,7 +369,7 @@ if (built.ics) {
 console.log('[build-deadlines] 已生成 deadlines.json' + (built.ics ? ' 与 deadlines.ics' : ''));
 console.log('  基准日期（北京）：' + result.today);
 console.log('  窗口：提醒 ' + WINDOW_DAYS + ' 天 / 日历 ' + ICS_WINDOW_DAYS + ' 天（逾期宽限 ' + OVERDUE_GRACE_DAYS + ' 天）');
-console.log('  条目：' + result.count + ' 条，其中 24 小时内到期 ' + result.within24h + ' 条；日历事件 ' + built.icsCount + ' 条');
+console.log('  条目：' + result.count + ' 条，其中今天截止 ' + result.dueTodayCount + ' 条；日历事件 ' + built.icsCount + ' 条');
 /* 通道 C 体检：只有「今天开始」且「显式填了开始时刻」的条目才可能建成闹钟 */
 const alarmToday = result.alarmItems;
 console.log('  通道 C 可建闹钟：' + alarmToday.length + ' 条（今天开始且有明确开始时刻，锚点 = 开始前 ' + ALARM_LEAD_MIN + ' 分钟）');

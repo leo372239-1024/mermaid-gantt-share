@@ -26,6 +26,11 @@
   var API_BASE = 'https://api.github.com/repos/' + REPO.owner + '/' + REPO.repo + '/contents/';
   var TOKEN_KEY = 'gantt_admin_token';
 
+  /* v33：表单取消「阶段」字段后，新增条目统一归入这个 section。
+     为什么不让表单自动选第一个 section：那会让新条目混进「入学前准备」这类语义明确的阶段里，
+     反而更难找；显式给一个中性的收纳区，语义清晰、也不影响既有阶段的内容。 */
+  var FALLBACK_SECTION = '新增事项';
+
   /* ---------- 日期工具（与 parser 保持一致） ---------- */
   var DAY = 86400000;
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
@@ -83,7 +88,22 @@
     });
     L.push(hasTime ? '    dateFormat YYYY-MM-DD HH:mm' : '    dateFormat YYYY-MM-DD');
     L.push('    axisFormat %Y-%m');
-    model.sections.forEach(function (sec) {
+    /* v33：兜底 section —— 表单已取消「阶段」字段，新增条目若被放进一个不存在的 section，
+       而这里又无脑 forEach，那条任务就会被静默丢掉（保存后「新增了但图上没有」）。
+       因此只要模型里存在「不属于任何已知 section」的任务，就自动补一个兜底 section 承载它们。
+       为什么放在末尾：保持既有 section 顺序不变（避免每次保存都重排 gantt.md 产生无意义 diff）。 */
+    var known = {};
+    (model.sections || []).forEach(function (sec) { known[sec.name] = true; });
+    var sections = (model.sections || []).slice();
+    /* 关键：只有**确实存在**孤立任务（不属于任何已知 section）时才补兜底 section。
+       早先这里无条件 push，导致每次序列化都会凭空多出一个空的「新增事项」——
+       round-trip 后 section 从 9 变 10，gantt.md 每次保存都被写脏（test/unit.js [6] 当场变红）。
+       空 section 没有任何承载价值，不进产物。 */
+    var orphanTasks = (model.orphans || []).filter(function (t) { return t && t.id; });
+    if (!known[FALLBACK_SECTION] && orphanTasks.length) {
+      sections.push({ name: FALLBACK_SECTION, tasks: orphanTasks });
+    }
+    sections.forEach(function (sec) {
       L.push('    section ' + sec.name);
       sec.tasks.forEach(function (t) { L.push('    ' + taskLine(t)); });
     });
@@ -350,6 +370,7 @@
 
   return {
     REPO: REPO,
+    FALLBACK_SECTION: FALLBACK_SECTION,
     serializeGantt: serializeGantt,
     serializeEvents: serializeEvents,
     blocksOf: blocksOf,

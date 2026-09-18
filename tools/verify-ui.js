@@ -179,27 +179,151 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   /* 形态断言（与数据无关）：有起止时刻的条目必须长成「M.D HH:mm 至 M.D HH:mm」 */
   check(caps.some(t => /\d{1,2}\.\d{1,2} \d{2}:\d{2} 至 \d{1,2}\.\d{1,2} \d{2}:\d{2}/.test(t)),
     '标题里的分钟级起止形态正确（含 至 连接词）');
-  const selLabels = await page.$$eval('#gv-lbox .gv-lname .dt', els => els.map(e => e.textContent.trim()));
-  check(selLabels.some(t => t === '2026-09-10 14:00 → 2026-09-10 17:00'), '左侧列表显示分钟级起止');
+  /* v33：左侧列表条目现在是「◆/▪ + 名称 + [#序号 + 日期区间 + 类型角标]」的复合结构，
+     所以不能再拿 .dt 的整段 textContent 去等一个纯日期串；
+     改为断言「存在含该分钟级区间的条目」，这是本来的验证意图（列表能显示到分钟）。 */
+  const selLabels = await page.$$eval('#gv-lbox .gv-lname', els => els.map(e => e.textContent.replace(/\s+/g, ' ')));
+  check(selLabels.some(t => t.indexOf('2026-09-10 14:00 → 2026-09-10 17:00') >= 0),
+    '左侧列表显示分钟级起止（在 ' + selLabels.length + ' 行中匹配到）');
 
-  console.log('[4] ddl 提醒面板');
+  console.log('[3b] 左侧事件列表（v33：平铺 / 最新修改在最上面 / 可滚动）');
+  /* 结构：不再按 section 分区，条目直接平铺在 .gv-lbox 下 */
+  const lboxInfo = await page.evaluate(() => {
+    const box = document.querySelector('#gv-lbox');
+    const rows = Array.prototype.slice.call(box.querySelectorAll('.gv-lname'));
+    /* 是否存在「阶段/section 标题」这类分区行：v33 后应为 0 */
+    const secRows = Array.prototype.slice.call(box.querySelectorAll('.gv-lsec,.gv-lhead-row,[class*=sec]'))
+      .filter(e => !e.classList.contains('gv-lname'));
+    return { rows: rows.length, secRows: secRows.length, cnt: (document.querySelector('#gv-lcnt') || {}).textContent };
+  });
+  check(lboxInfo.rows > 0, '左侧列表平铺出 ' + lboxInfo.rows + ' 个条目行');
+  check(lboxInfo.secRows === 0, '左侧列表已无分区头（阶段属性取消后不再分组，实际 ' + lboxInfo.secRows + ' 个分区行）');
+  /* 序号与类型角标：让「事件 / 时间点」在平铺后仍一眼可辨 */
+  const badges = await page.$$eval('#gv-lbox .gv-lname .kbadge', els => els.map(e => e.textContent.trim()));
+  check(badges.length === lboxInfo.rows, '每个条目都带类型角标（' + badges.length + ' 个）');
+  check(badges.every(t => t === '事件' || t === '时间点'), '角标取值合法（出现：' + Array.from(new Set(badges)).join('/') + '）');
+  check(badges.some(t => t === '事件') && badges.some(t => t === '时间点'), '事件与时间点两类角标均出现');
+  const seqNums = await page.$$eval('#gv-lbox .gv-lname .sq', els => els.map(e => e.textContent.trim()));
+  check(seqNums.length === lboxInfo.rows && seqNums.every(t => /^#\d+$/.test(t)), '每个条目带 #序号（' + seqNums.slice(0, 3).join(' ') + ' …）');
+  /* 「最新修改在最上面」：给列表**最后一条**打上当前时间戳，重载后它必须跑到第一位。
+     这是本需求的判定式 —— 不这么做就只是"看起来排过序"，无法证明按 modTs 降序。 */
+  const lastOne = await page.evaluate(() => {
+    const rows = Array.prototype.slice.call(document.querySelectorAll('#gv-lbox .gv-lname'));
+    const last = rows[rows.length - 1];
+    if (!last) return null;
+    return {
+      name: (last.querySelector('.nm b') || {}).textContent || '',
+      seq: (last.querySelector('.sq') || {}).textContent || ''
+    };
+  });
+  check(!!lastOne && !!lastOne.name, '取到列表末位条目（' + (lastOne && lastOne.name) + ' ' + (lastOne && lastOne.seq) + '）');
+  if (lastOne && lastOne.name) {
+    /* modTs 以任务 id 为键，而 DOM 上只有 #序号；通过 viewer 暴露的只读自检口反查 id */
+    const ordered = await page.evaluate(async (targetName) => {
+      const KEY = 'mermaid-gantt.modTs.v1';
+      const v = window.__ganttViewer;
+      if (!v || typeof v.debugTasks !== 'function') return { ok: false, reason: 'window.__ganttViewer.debugTasks 不可用' };
+      const t = v.debugTasks().filter(x => x.name === targetName)[0];
+      if (!t) return { ok: false, reason: '未找到同名任务「' + targetName + '」' };
+      /* 只给这一条打上「未来」时间戳（远超其他），其余清掉 —— 排序必须把它顶到首位 */
+      localStorage.setItem(KEY, JSON.stringify({ [t.id]: Date.now() + 86400000 }));
+      return { ok: true, id: t.id };
+    }, lastOne.name);
+    if (ordered.ok) {
+      await page.reload({ waitUntil: 'load' });
+      /* 不用 waitForSelector：页面上同时存在 100+ 个 .gv-lname，playwright 会解析出多个候选
+         并反复等待「第一个可见」，在本页的滚动容器里容易卡到超时。
+         直接轮询行数与首行文本，稳定且能表达真实意图。 */
+      const waitFirstRow = async () => {
+        for (let i = 0; i < 60; i++) {
+          const txt = await page.$eval('#gv-lbox .gv-lname .nm b', e => e.textContent.trim()).catch(() => '');
+          if (txt) return txt;
+          await page.waitForTimeout(250);
+        }
+        return '';
+      };
+      const topNow = await waitFirstRow();
+      check(topNow === lastOne.name,
+        '打上最新修改时间戳后，该条目升到列表首位（目标「' + lastOne.name + '」，实际首位「' + topNow + '」）');
+      /* 反向：清空 modTs 后应回落到「按 ID 序号升序」的稳定序（不是随便排） */
+      await page.evaluate(() => localStorage.removeItem('mermaid-gantt.modTs.v1'));
+      await page.reload({ waitUntil: 'load' });
+      await waitFirstRow();
+      const seqAfter = await page.$$eval('#gv-lbox .gv-lname .sq', els => els.map(e => e.textContent.replace('#', '')));
+      const nums = seqAfter.map(Number);
+      check(nums.length > 0 && nums.every((n, i) => i === 0 || n >= nums[i - 1]),
+        '无修改记录时回落到 ID 序号升序的稳定排序（前 5 个：' + seqAfter.slice(0, 5).join(', ') + '）');
+    } else {
+      console.log('   · 跳过「最新修改在最上面」断言（' + ordered.reason + '）');
+    }
+  }
+  /* 滚动条：一屏放不下时可滚动。
+     注意：无头默认视口下左栏可能是**折叠态**（高度 0），此时 scrollHeight/clientHeight 都是 0，
+     断言会「空过」。所以先显式展开左栏，再量真实高度——否则这条等于没测。 */
+  await page.evaluate(() => {
+    const v = window.__ganttViewer;
+    if (v && typeof v.toggleLabels === 'function') {
+      const collapsed = document.querySelector('#gv-labels').classList.contains('collapsed');
+      if (collapsed) v.toggleLabels();
+    }
+  });
+  await page.waitForTimeout(350);
+  const scrollInfo = await page.evaluate(() => {
+    const box = document.querySelector('#gv-lbox');
+    const cs = getComputedStyle(box);
+    return {
+      overflowY: cs.overflowY,
+      maxH: cs.maxHeight,
+      scrollH: box.scrollHeight,
+      clientH: box.clientHeight,
+      rows: box.querySelectorAll('.gv-lname').length,
+      canScroll: box.scrollHeight > box.clientHeight + 1
+    };
+  });
+  check(/auto|scroll/.test(scrollInfo.overflowY), '列表容器纵向可滚动（overflow-y=' + scrollInfo.overflowY + '）');
+  check(scrollInfo.maxH && scrollInfo.maxH !== 'none', '列表容器有最大高度约束（max-height=' + scrollInfo.maxH + '）→ 超出时出现滚动条');
+  check(scrollInfo.clientH > 0,
+    '展开左栏后容器有真实高度（' + scrollInfo.clientH + 'px 视口 / ' + scrollInfo.scrollH + 'px 内容 / ' + scrollInfo.rows + ' 行）');
+  check(scrollInfo.canScroll,
+    '★ 需求 1b：146 条内容超出可视高度 → 容器确实可上下滚动（' + scrollInfo.clientH + 'px 视口 / ' + scrollInfo.scrollH + 'px 内容）');
+  /* 实际滚一下，确认不是「声明了 overflow 但滚不动」 */
+  const scrolled = await page.evaluate(() => {
+    const box = document.querySelector('#gv-lbox');
+    const before = box.scrollTop;
+    box.scrollTop = 500;
+    return { before: before, after: box.scrollTop };
+  });
+  check(scrolled.after > scrolled.before,
+    '★ 需求 1b：滚动真实生效（scrollTop ' + scrolled.before + ' → ' + scrolled.after + '）');
+  await page.evaluate(() => {
+    const box = document.querySelector('#gv-lbox');
+    if (box) box.scrollTop = 0;
+  });
+
+  console.log('[4] 今日截止提醒面板（v33 口径：截止日期 = 今天）');
   await page.click('[data-act="remind"]');
   await page.waitForSelector('.gv-rem-panel.on', { timeout: 5000 });
   const whens = await page.$$eval('.gv-rem-list .gv-rem-item .when', els => els.map(e => e.textContent.trim()));
   const chips = await page.$$eval('.gv-rem-list .gv-rem-item .chip', els => els.map(e => e.textContent.trim()));
-  /* ⚠️ 「有 N 条」是时间相关断言：9.10 晚上 19:00 之后，当天所有条目都已过点，
-     又还没有 24 小时内到期的新条目 → 列表合法地为空。此时校验空态文案，而不是让用例假红。 */
+  /* v33 口径：收录「截止日期 = 当天」的条目，与运行时刻无关 ——
+     所以「今天有课」的日期下列表必非空（课程表逐日展开，今天一定有课）。
+     但仍保留空态分支：数据侧若当天真的无条目，面板应给出空态文案而非崩溃。 */
   if (whens.length) {
-    check(true, '提醒列表有 ' + whens.length + ' 条');
-    /* 只断言「格式」是分钟级起止，不断言具体时刻：面板会随真实时间推移淘汰已过期条目 */
+    check(true, '今日截止提醒列表有 ' + whens.length + ' 条');
+    /* 只断言「格式」是分钟级起止，不断言具体时刻：面板内容随数据变化 */
     check(whens.every(t => /^\d{1,2}\.\d{1,2} \d{2}:\d{2} → \d{1,2}\.\d{1,2} \d{2}:\d{2}$/.test(t)),
       '每条显示开始→截止（分钟级）：' + whens.join(' | '));
-    check(chips.some(t => /剩 \d+ (分钟|小时)/.test(t)), '剩余时长精确到分钟：' + chips.join(' | '));
+    check(chips.some(t => /剩 \d+ (分钟|小时)/.test(t) || /已过点/.test(t)),
+      '剩余时长/过点状态明确：' + chips.join(' | '));
   } else {
     const emptyTxt = await page.$eval('.gv-rem-empty', e => e.textContent.trim()).catch(() => '');
-    check(/暂无即将截止的待办/.test(emptyTxt),
-      '当前无「剩余不足一天」的待办 → 面板给出空态文案（时间相关，非缺陷）：「' + emptyTxt.replace(/\s+/g, ' ') + '」');
+    check(/今天没有截止的待办/.test(emptyTxt),
+      '今天无截止条目 → 面板给出空态文案：「' + emptyTxt.replace(/\s+/g, ' ') + '」');
   }
+  /* v33 新增断言：面板副标题必须明示新口径（避免旧文案残留让同学误解筛选规则） */
+  const remSub = await page.$eval('.gv-rem-panel', e => e.textContent.replace(/\s+/g, ' ')).catch(() => '');
+  check(/今天截止/.test(remSub), '提醒面板文案明示「今天截止」口径（' + remSub.slice(0, 120) + '…）');
+  check(!/不足一天|24 ?小时/.test(remSub), '提醒面板已不含「不足一天 / 24 小时」旧口径文案');
   const btns = await page.$$eval('.gv-rem-btn', els => els.map(e => e.textContent.trim()));
   check(btns.length === 4, '系统级通道 4 个按钮（实际 ' + btns.length + '）');
   check(btns.some(t => t.indexOf('加入系统日历') >= 0) && btns.some(t => t.indexOf('同步系统闹钟') >= 0), '含「加入系统日历」「同步系统闹钟」');
@@ -232,10 +356,16 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     /* 蓝纹 zi = 1,3,5... 相邻两条相差 2 天 → px = (x_last - x_first) / (2*(n-1)) */
     const px = xs.length > 1 ? (xs[xs.length - 1] - xs[0]) / (2 * (xs.length - 1)) : parseFloat(blue[0].getAttribute('width'));
     const leftPad = xs[0] - px;                 /* 第 1 条蓝纹 = 第 1 天 → x = LEFT_PAD + 1*px */
+    /* 日期数字的文本节点形如「18」（px/天宽时）或「18 周五」（放大后带周几，周几在 <tspan> 里，
+       textContent 因此含「周X」后缀）。早先这里用 /^\d{1,2}$/ 严格匹配纯数字，
+       放大态下全部落选 → dayFracs 为空 → 断言假红。改为「以 1-2 位数字开头即算日期数字」。 */
     const dn = Array.prototype.slice.call(svg.querySelectorAll('text'))
-      .filter(e => e.getAttribute('font-size') === '8.5' && /^\d{1,2}$/.test(e.textContent.trim()))
+      .filter(e => e.getAttribute('font-size') === '8.5' && /^\d{1,2}(\s|$)/.test(e.textContent.trim()))
       .map(e => Math.round((((parseFloat(e.getAttribute('x')) - leftPad) / px) % 1) * 1000) / 1000);
-    return { px: px, leftPad: leftPad, count: blue.length, xs: xs, fills: fills, dayFracs: dn };
+    return { px: px, leftPad: leftPad, count: blue.length, xs: xs, fills: fills, dayFracs: dn,
+      dayTxts: Array.prototype.slice.call(svg.querySelectorAll('text'))
+        .filter(e => e.getAttribute('font-size') === '8.5').slice(0, 4)
+        .map(e => e.textContent.trim()) };
   });
   check(!!geo && geo.count > 0, '存在逐日交替底色条纹（' + (geo && geo.count) + ' 条，px/天=' + (geo && geo.px.toFixed(2)) + '）');
   check(!!geo && geo.fills.every(f => f === '#e8f2fd'), '条纹统一浅蓝 #e8f2fd');
@@ -243,6 +373,8 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     '蓝条逐日交替（相邻蓝条间隔 = 2 天，实测 ' + (geo && (geo.xs[1] - geo.xs[0]).toFixed(1)) + 'px，期望 ' + (geo && (2 * geo.px).toFixed(1)) + 'px）');
   check(!!geo && geo.dayFracs.length >= 3 && geo.dayFracs.every(f => Math.abs(f - 0.5) < 0.02),
     '日期数字落在当日正中（日内小数≈0.5，实测 ' + (geo ? geo.dayFracs.slice(0, 6).join(' / ') : '') + '）');
+  check(!!geo && geo.dayTxts.length > 0,
+    '日期数字文本可识别（样本：' + (geo ? geo.dayTxts.join(' | ') : '') + '）');
 
   console.log('[7] 事件条按分钟级时刻等比定位与定长');
   const bars = await page.evaluate(() => {
@@ -382,13 +514,20 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
       '清单只含「今天开始」的条目（出现日期 ' + dset.join('/') + '，含跨零点回退的昨天 ' + md.yest + '）');
   }
   /* 线上/本地实际提供的 deadlines.json 必须满足通道 C 契约（这部分与真实时间无关，任何时候都成立）：
-     ① schema = 4 ② alarmItems 是 items 的今日子集 ③ 有地点的条目，标签里必须带「｜地点｜」段。
+     ① schema = 5（v33：提醒口径改为「截止落在当天」）② items 均带 dueToday 布尔位
+     ③ alarmItems 是 items 的今日子集 ④ 有地点的条目，标签里必须带「｜地点｜」段。
      这一步能抓到「忘了提交 deadlines.json」「Actions 用旧脚本重建」这类只在产物层暴露的问题。 */
   const dj = await page.evaluate(async () => {
     const res = await fetch('./deadlines.json', { cache: 'no-store' });
     return res.ok ? res.json() : null;
   });
-  check(!!dj && dj.schema === 4, '站点提供的 deadlines.json schema = 4（实际 ' + (dj && dj.schema) + '）');
+  check(!!dj && dj.schema === 5, '站点提供的 deadlines.json schema = 5（v33 口径，实际 ' + (dj && dj.schema) + '）');
+  check(!!dj && dj.within24h === undefined && dj.within24hText === undefined,
+    '站点产物已移除旧的 within24h / within24hText 字段');
+  check(!!dj && typeof dj.dueTodayCount === 'number' && typeof dj.dueTodayText === 'string',
+    '站点产物带 dueTodayCount / dueTodayText（' + (dj && dj.dueTodayCount) + ' 条：「' + (dj && dj.dueTodayText) + '」）');
+  check(!!dj && dj.items.every(i => typeof i.dueToday === 'boolean'),
+    '站点产物 items 均带 dueToday 布尔位（' + (dj && dj.items.length) + ' 条）');
   check(!!dj && dj.alarmLabelSep === '｜' && dj.alarmLeadMin === 15,
     '站点产物带 alarmLabelSep = ｜、alarmLeadMin = 15');
   check(!!dj && Array.isArray(dj.alarmItems) && dj.alarmItems.every(i => i.startDaysLeft === 0 && i.alarmExact === true),
@@ -416,6 +555,16 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   check(kindOpts.some(t => t.indexOf('事件') >= 0) && kindOpts.some(t => t.indexOf('时间点') >= 0),
     '两项分别是「事件」与「时间点」');
   check(!kindOpts.some(t => t.indexOf('关键节点') >= 0), '类型里已无「关键节点」选项');
+
+  /* v33 需求 1a：表单取消「阶段」字段 —— 彻底不存在该控件（不是隐藏、不是禁用） */
+  const secField = await page.evaluate(() => {
+    const byName = document.querySelector('#gv-crudform [name=section]');
+    const labels = Array.prototype.slice.call(document.querySelectorAll('#gv-crudform label'))
+      .map(l => l.textContent.trim());
+    return { hasSelect: !!byName, secLabel: labels.filter(t => /^阶段/.test(t)) };
+  });
+  check(!secField.hasSelect, '新增表单已无「阶段」下拉控件（name=section 不存在）');
+  check(secField.secLabel.length === 0, '表单标签里已无「阶段」字样（实际 ' + JSON.stringify(secField.secLabel) + '）');
 
   /* 时刻清除：原生 time 控件在手机上无法置空，必须有一个显式出口 */
   await page.fill('[name=startTime]', '14:00');
@@ -549,22 +698,24 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     await p2.waitForSelector('.gv-editbtn', { timeout: 5000 });
     await p2.click('.gv-editbtn');
     await p2.waitForSelector('#gv-crudform', { timeout: 5000 });
+    /* v33：表单提交后**立即同步**（需求 2），所以这里不再有「暂存等手动保存」的中间态。
+       改造成两段：
+         A 段 —— 在**已登录**态点保存：必须立刻产生 PUT 写回，且 pending 被清空（需求 2 的判定式）；
+         B 段 —— 单独构造「本页缺 b7 + 远端有 b7」的合并写回场景（把提交后的写回内容当作观察对象）。 */
     await p2.click('#gv-crudsave');
-    await p2.waitForTimeout(400);
+    /* 等真实写回落地（PUT 被拦截到即证明立即同步生效） */
+    for (let i = 0; i < 40 && !puts.some(x => /events\.js/.test(decodeURIComponent(x.url))); i++) {
+      await p2.waitForTimeout(150);
+    }
     const staged = await p2.evaluate(() => {
       const p = (function () { try { return JSON.parse(localStorage.getItem('gantt_pending') || 'null'); } catch (e) { return null; } })();
-      return { has: !!p, evCount: p && p.events ? Object.keys(p.events).length : -1 };
+      return { has: !!p };
     });
-    check(staged.has && staged.evCount > 0,
-      '改动已暂存，且 pending 里带着 events（' + staged.evCount + ' 条 —— 本页只认得这些，正是要考验的点）');
-    await p2.click('[data-act="save"]');
-    await p2.waitForTimeout(1000);
-    /* 页面检测到「本页较旧」时会在 1.5s 后自动刷新，提示条要赶在刷新前读 */
-    const toastTxt = await p2.evaluate(() => {
-      const t = document.querySelector('.gv-toast');
-      return t ? t.textContent : '';
-    });
-    await p2.waitForTimeout(1200);
+    check(puts.length > 0,
+      '★ 需求 2：表单点「保存」后立即触发同步（拦截到 ' + puts.length + ' 次 PUT，无需再点工具栏保存）');
+    check(!staged.has,
+      '★ 需求 2：同步成功后 pending 被清空（改动已进 GitHub，不再滞留本地队列）');
+
     const evPut = puts.filter(x => /events\.js/.test(decodeURIComponent(x.url)))[0];
     check(!!evPut, '保存真的写回了 js/events.js（拦截到 PUT ' + puts.length + ' 次）');
     const written = evPut ? Buffer.from(evPut.body.content || '', 'base64').toString('utf8') : '';
@@ -573,6 +724,11 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     check(/^ {4}b1: \{/m.test(written) && /^ {4}b6: \{/m.test(written), '其余条目照常写出（合并没有破坏正常内容）');
     const gPut = puts.filter(x => /gantt\.md/.test(decodeURIComponent(x.url)))[0];
     check(!!gPut, 'gantt.md 同样被写回（两条写操作都在）');
+    /* v33：保留远端条目的提示改由「提交即同步」的 saveAll().then 发出 */
+    const toastTxt = await p2.evaluate(() => {
+      const t = document.querySelector('.gv-toast');
+      return t ? t.textContent : '';
+    });
     check(/保留远端新增的 ?b7/.test(toastTxt), '页面明确告知「已保留远端新增的 b7」（实际「' + toastTxt + '」）');
     await p2.close();
   }
