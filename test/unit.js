@@ -547,5 +547,69 @@ let threw = '';
 try { Admin.blocksOf('  return {\n    b7: {\n      short: "x"\n'); } catch (e) { threw = e.message; }
 check(/缺少结束行/.test(threw), '结构异常时报错中止保存（' + threw + '）');
 
+/* ---- 14. 左栏搜索匹配口径（v34，纯函数在 viewer.js 出口，无需 DOM） ---- */
+console.log('[14] 左栏搜索：分词 / 三域匹配 / 来源标签 / 高亮 / 真实数据一致性');
+const S = Viewer;
+/* 合成样本：不依赖实时数据，把「日期写成什么样都该搜得到」这类规则钉死 */
+const ST1 = {
+  id: 'b7', name: '学术写作能力(周五·09.11 08:00-09:50 东区DQ505)',
+  start: new Date(2026, 8, 11), end: new Date(2026, 8, 11),
+  startTime: '08:00', endTime: '09:50'
+};
+check(S.searchTerms('  论文　答辩 ').join(',') === '论文,答辩',
+  '分词：半角/全角空格都作分隔（得到 ' + S.searchTerms('  论文　答辩 ').join('/') + '）');
+check(S.searchHits(ST1, '', 7, null).hit === true, '空查询：命中一切（列表不会被搜空）');
+check(S.searchHits(ST1, '学术写作', 7, null).nameTerms.join(',') === '学术写作', '名称命中：回传高亮词');
+check(S.searchHits(ST1, '学术写作', 7, null).why === '', '名称命中：不打来源角标（标题里已看得见）');
+check(S.searchHits(ST1, 'dq505', 7, null).hit === true, '大小写不敏感（dq505 ← DQ505）');
+const dForms = ['9.11', '09.11', '9-11', '09-11', '2026-09-11', '9月11日', '20260911', '2026-09'];
+check(dForms.every(q => S.searchHits(ST1, q, 7, null).hit),
+  '日期多写法均可命中：' + dForms.join(' / '));
+check(S.searchHits(ST1, '2026-09-11', 7, null).why === '日期', '按完整日期命中 → 来源角标「日期」');
+check(S.searchHits(ST1, '2026-09-11', 7, null).nameTerms.length === 0, '日期命中时标题无该词 → 不回传高亮词');
+check(S.searchHits(ST1, '08:00', 7, null).why === '', '时刻写在标题里时算「名称命中」（不打角标）');
+const ST3 = { id: 't9', name: '交材料', start: new Date(2026, 8, 12), end: new Date(2026, 8, 12), startTime: '14:30', endTime: '17:00' };
+check(S.searchHits(ST3, '14:30', 9, null).why === '时刻', '按时刻命中 → 来源角标「时刻」（标题里没有该时刻）');
+check(S.searchHits(ST1, '#7', 7, null).why === '编号' && S.searchHits(ST1, 'b7', 7, null).why === '编号',
+  '按 #序号 / 任务 id 命中 → 来源角标「编号」');
+check(S.searchHits(ST1, '#7', 7, null).hit === true && S.searchHits(ST1, '#7', 17, null).hit === false,
+  '「#序号」精确直达：#7 不会把 #17 一并带出来（子串匹配的经典坑）');
+const ST_EV = { where: '东区DQ505', owners: [{ name: '周英', role: '学习委员' }], steps: ['先填表', '再交表'] };
+const ST2 = { id: 'b9', name: '交材料', start: new Date(2026, 8, 12), end: new Date(2026, 8, 12) };
+check(S.searchHits(ST2, '周英', 3, ST_EV).why === '详情', '详情命中（负责人姓名）→ 来源角标「详情」');
+check(S.searchHits(ST2, '再交表', 3, ST_EV).hit === true, '详情命中（执行步骤里的词）');
+check(S.searchHits(ST2, '', 3, ST_EV).hit === true, '空查询 + 有详情：正常命中');
+check(S.searchHits(ST1, '学术 08:00', 7, null).hit === true, '多关键词 AND：一个在名称、一个在时刻 → 命中');
+check(S.searchHits(ST1, '学术 化学', 7, null).hit === false, '多关键词 AND：只要一个不命中 → 整条不进结果');
+check(S.searchHits(ST1, '不存在的词xyz', 7, null).hit === false, '无命中 → hit=false');
+/* 域之间用 \u0001 分隔：保证关键词不会跨域拼出假命中 */
+check((S.searchParts(ST1, 7, null).all.match(/\u0001/g) || []).length === 4,
+  '三个域 + 名称共 4 个分隔符（域之间互不串味）');
+check(S.hlName('学术写作能力', ['学术', '写作']) === '<mark class="gv-hl">学术</mark><mark class="gv-hl">写作</mark>能力',
+  '高亮：多个关键词各自标黄');
+check(S.hlName('abcd', ['abc', 'bcd']) === '<mark class="gv-hl">abcd</mark>',
+  '高亮：重叠区间合并（不产出嵌套 <mark>）');
+check(S.hlName('A&B', ['&']) === 'A<mark class="gv-hl">&amp;</mark>B',
+  '高亮：HTML 实体安全（& 先转义再包 mark）');
+check(S.hlName('<b>班务</b>', ['班务']) === '&lt;b&gt;<mark class="gv-hl">班务</mark>&lt;/b&gt;',
+  '高亮：标签字符被转义（不会被注入 HTML）');
+check(S.hlName('无关键词', ['zzz']) === '无关键词', '高亮：无命中时原样转义输出');
+check(S.hlName('名字', []) === '名字', '高亮：空词表 → 只转义');
+/* 真实数据一致性：搜得到的一定真的含该词，且随机词不会退化成「全命中」 */
+const p2 = n => (n < 10 ? '0' : '') + n;
+const evOf = t => Events[t.id] || Events[String(t.id).match(/^k(\d+)w\d+$/) ? 'k' + String(t.id).match(/^k(\d+)w\d+$/)[1] : ''] || null;
+check(model.all.every(t => S.searchHits(t, '', model.all.indexOf(t) + 1, evOf(t)).hit),
+  '真实数据：空查询下全表均命中（' + model.all.length + ' 条）');
+const kwReal = String(model.all[0].name).slice(0, 2);
+const hitsReal = model.all.filter(t => S.searchHits(t, kwReal, model.all.indexOf(t) + 1, evOf(t)).hit);
+check(hitsReal.length > 0 && hitsReal.every(t => S.searchParts(t, model.all.indexOf(t) + 1, evOf(t)).all.indexOf(kwReal) >= 0),
+  '真实数据：命中集合逐条复核确实含「' + kwReal + '」（' + hitsReal.length + ' 条，无假命中）');
+check(model.all.every(t => S.searchHits(t, 'zzz不存在的词', model.all.indexOf(t) + 1, null).hit === false),
+  '真实数据：随机词全表零命中（没有退化成「搜什么都全中」）');
+const t0 = model.all[0];
+const ymd0 = t0.start.getFullYear() + '-' + p2(t0.start.getMonth() + 1) + '-' + p2(t0.start.getDate());
+check(model.all.filter(t => S.searchHits(t, ymd0, model.all.indexOf(t) + 1, evOf(t)).hit).indexOf(t0) >= 0,
+  '真实数据：用某条的完整日期搜它，自己必在结果里（' + ymd0 + '）');
+
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

@@ -26,6 +26,10 @@
  * 15) 保存采用**合并写回**：写回 js/events.js 前先读远端原文，「远端有、本页没有、且不是本次
  *     显式删除（pending.delIds）」的条目按原文逐字保留 —— 页面过期只会少写、绝不删数据；
  *     gantt.md 因是整块替换，仍保留一道 id 级漂移体检（remote − local − delIds）。
+ * 16) 左栏「事件列表」内搜索（v34）：关键词命中 **名称 / 日期与时刻 / 详情**（空格分词 = 同时满足），
+ *     类型档「全部 / 事件 / 时间点」与关键词叠加过滤；结果标黄高亮、命中来源角标（日期命中/详情命中）、
+ *     头部计数显示「命中 N / 总数」、图上用琥珀虚线轮廓圈出命中条（#gv-searchhits，不吃指针事件）。
+ *     回车 = 打开第一条命中（含定位+闪烁），Esc = 清空（已空则失焦），✕ = 清空并回焦。
  *
  * 用法：GanttViewer.mount(containerEl, ganttCode, eventsData)
  */
@@ -98,6 +102,7 @@
 .gv-labels.collapsed .gv-lhead{flex-direction:column;gap:8px;padding:8px 3px;background:#fafbff}
 .gv-labels.collapsed .gv-lhead .gv-lttl{display:none}
 .gv-labels.collapsed .gv-lbox{display:none}
+.gv-labels.collapsed .gv-lsearch{display:none}
 /* ---- 左侧事件列表（v33：平铺全部事件/时间点，最新修改在最上面，超出可纵向滚动） ---- */
 .gv-lhead{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:12px;font-weight:700;
   color:#4338ca;background:linear-gradient(180deg,#f5f7ff,#fafbff);border-bottom:1px solid var(--gv-line-soft)}
@@ -111,7 +116,9 @@
    这里必须是一个「有确定高度上限」的滚动区，否则 flex 会把它撑到内容高度、把整个页面顶长。
    高度取「视口高 − 工具栏/图例/头部占位」，保证滚动条始终出现在列表内部而非页面级。 */
 .gv-lbox{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
-  max-height:calc(100vh - 190px);min-height:120px;padding-bottom:4px}
+  max-height:calc(100vh - 258px);min-height:120px;padding-bottom:4px}
+/* ↑ 258 = 190（工具栏/图例/头部原有占位）+ 68（v34 新增的搜索区高度）：搜索区加进左栏后
+   必须同步下调列表上限，否则左栏总高会顶出视口、页面级滚动条替代列表内滚动。 */
 /* 滚动条常显且加宽（macOS/Windows 默认滚动条在浅色底上几乎看不见，
    而「一屏放不下时可滚动」是明确的产品要求 → 必须让用户一眼看出这里能滚） */
 .gv-lbox{scrollbar-width:thin;scrollbar-color:#c7d2fe #f6f8fc}
@@ -134,6 +141,39 @@
 .gv-lname .nm .kbadge{display:inline-block;margin-left:5px;font-size:9.5px;font-weight:700;border-radius:999px;
   padding:0 5px;vertical-align:1px;background:#eef2ff;color:#4f46e5;border:1px solid #e0e7ff}
 .gv-lname .nm .kbadge.pt{background:#f5f3ff;color:#6d28d9;border-color:#ede9fe}
+/* ---- v34 左栏搜索（搜索事件 / 时间点） ---- */
+.gv-lsearch{flex:0 0 auto;padding:6px 7px 5px;border-bottom:1px solid var(--gv-line-soft);background:#fff}
+.gv-lsearch .box{display:flex;align-items:center;gap:4px;background:#f8fafc;border:1px solid #e2e8f0;
+  border-radius:8px;padding:2px 6px;transition:border-color .18s,box-shadow .18s,background .18s}
+.gv-lsearch .box:focus-within{background:#fff;border-color:#a5b4fc;box-shadow:0 0 0 3px rgba(99,102,241,.13)}
+.gv-lsearch .box .ico{flex:0 0 auto;font-size:10.5px;line-height:1;opacity:.75}
+.gv-lsearch input{flex:1 1 auto;min-width:0;width:100%;border:0;background:transparent;outline:0;
+  font-family:inherit;font-size:11.5px;color:#0f172a;padding:3px 0}
+.gv-lsearch input::placeholder{color:#94a3b8}
+.gv-lsearch .clr{display:none;flex:0 0 auto;border:0;background:#e2e8f0;color:#475569;width:15px;height:15px;
+  border-radius:50%;line-height:1;font-size:9px;cursor:pointer;padding:0;font-family:inherit}
+.gv-lsearch .clr:hover{background:#cbd5e1;color:#0f172a}
+.gv-lsearch.hasq .clr{display:block}
+.gv-lchips{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
+.gv-lchips button{flex:0 0 auto;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:999px;
+  font-size:10px;line-height:1;padding:3px 7px;cursor:pointer;font-family:inherit;
+  transition:background .16s,color .16s,border-color .16s}
+.gv-lchips button:hover{border-color:#c7d2fe;color:#4338ca}
+.gv-lchips button.on{background:#eef2ff;border-color:#c7d2fe;color:#4338ca;font-weight:700}
+.gv-lnmatch{padding:16px 10px;text-align:center;font-size:11px;color:#94a3b8;line-height:1.8}
+.gv-lnmatch b{color:#475569;word-break:break-all}
+mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
+.gv-why{display:inline-block;margin-left:4px;font-size:9px;font-weight:700;color:#0e7490;background:#ecfeff;
+  border:1px solid #a5f3fc;border-radius:999px;padding:0 4px;vertical-align:1px}
+/* 命中定位条（列表底部，默认隐藏）：命中的条都在当前视野外时给一条出路 ——
+   搜索的价值是「在图上看清它在哪」，轮廓画在视野外等于没圈。 */
+.gv-lfoot{display:none;flex:0 0 auto;padding:6px 8px;border-top:1px solid var(--gv-line-soft);
+  background:#fffdf6;font-size:10.5px;color:#92400e;line-height:1.5;word-break:break-all}
+.gv-lfoot.on{display:block}
+.gv-lfoot.away{cursor:pointer}
+.gv-lfoot.away:hover{background:#fef9e7}
+.gv-lfoot:not(.away){background:#f8fafc;color:#64748b}
+.gv-labels.collapsed .gv-lfoot{display:none}
 /* ---- 右侧滚动时间图 ---- */
 .gv-scroll{flex:1 1 auto;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;min-width:0}
 .gv-scroll svg{display:block}
@@ -525,6 +565,117 @@
     return fmtDT(t.start, t.startTime) + ' → ' + fmtDT(t.end, t.endTime);
   }
 
+  /* ---------- v34 搜索匹配（纯函数，末尾 export 给 test/unit.js 断言；不碰 DOM） ----------
+     口径与理由：
+       · 空格分词、每个词都必须命中（AND）：「论文 答辩」比一次输入一整串更接近「找东西」的直觉；
+       · 命中域分三层：名称 / 日期与时刻 / 元信息（id、#序号、事件详情）——
+         分域是为了能回答「这条标题里没有关键词，为什么它会出现在结果里」，并把原因回传渲染层做角标；
+       · 日期做多形态展开（2026-09-11 / 09-11 / 9-11 / 9.11 / 09.11 / 9月11日 / 20260911 / 2026-09），
+         因为同学记日子不会统一成一种写法；填了时刻就一并进日期域（搜 08:00 能定位那天早上的课）；
+       · 三个域用 \u0001 分隔后再拼接，防止「跨域拼出的假命中」（名称末字 + 日期首字拼成一个词）。 */
+  function searchTerms(raw) {
+    return String(raw == null ? '' : raw).toLowerCase().split(/[\s\u3000]+/).filter(function (s) { return s.length > 0; });
+  }
+  function dateHayOf(d, hm) {
+    if (!d) return '';
+    var y = d.getFullYear(), m = d.getMonth() + 1, dd = d.getDate();
+    var out = [
+      y + '-' + pad(m) + '-' + pad(dd),       /* 2026-09-11 */
+      pad(m) + '-' + pad(dd), m + '-' + dd,   /* 09-11 / 9-11 */
+      m + '.' + dd, pad(m) + '.' + pad(dd),   /* 9.11 / 09.11（同学最常用的写法） */
+      m + '月' + dd + '日', m + '月' + dd + '号',
+      '' + y + pad(m) + pad(dd),              /* 20260911 */
+      y + '-' + pad(m), y + '年' + m + '月'
+    ];
+    if (hm) out.push(String(hm).toLowerCase());
+    return out.join(' ');
+  }
+  function evTextOf(ev) {
+    if (!ev) return '';
+    var out = [];
+    ['short', 'who', 'when', 'where', 'files', 'tips'].forEach(function (k) {
+      if (ev[k] && typeof ev[k] === 'string') out.push(ev[k]);
+    });
+    if (ev.steps && ev.steps.length) out.push(Array.prototype.join.call(ev.steps, ' '));
+    if (ev.owners && ev.owners.length) out.push(ev.owners.map(function (o) { return ((o && o.name) || '') + ((o && o.role) || ''); }).join(' '));
+    if (ev.attachments && ev.attachments.length) out.push(ev.attachments.map(function (a) { return (a && a.name) || ''; }).join(' '));
+    return out.join(' ');
+  }
+  function searchParts(t, seq, ev) {
+    t = t || {};
+    var name = String(t.name == null ? '' : t.name).toLowerCase();
+    var date = (dateHayOf(t.start, null) + ' ' + dateHayOf(t.end, null)).trim();
+    var time = [(t.startTime || ''), (t.endTime || '')].join(' ').trim().toLowerCase();
+    var ids = [];
+    if (t.id) ids.push(String(t.id).toLowerCase());
+    if (seq) ids.push('#' + seq);
+    var detail = evTextOf(ev).toLowerCase();
+    var ident = ids.join(' ');
+    return { name: name, date: date, time: time, id: ident, detail: detail,
+      all: [name, date, time, ident, detail].join(' \u0001 ') };
+  }
+  /* 返回 {hit, nameTerms, why}：hit=false → 不进列表；nameTerms → 标题命中的词（供 <mark> 高亮）；
+     why → '' 或命中来源标签（日期 / 时刻 / 编号 / 详情，多来源用 + 连接）。
+     两条特殊规则：
+       · 「#N」= 按序号直达，精确匹配不前缀延伸（否则 #1 会带出 #10..#19）；
+       · 其余一律子串匹配（大小写不敏感），且每个词都必须命中（AND）。
+     为什么要回传来源：结果标题里看不到关键词时（例如按地点搜到某场活动），
+     不给解释用户会以为「搜索坏了」——角标把「为什么命中」摊在明面上。 */
+  function searchHits(t, raw, seq, ev) {
+    var terms = searchTerms(raw);
+    if (!terms.length) return { hit: true, nameTerms: [], why: '' };
+    var p = searchParts(t, seq, ev);
+    var nameTerms = [], srcs = [];
+    for (var i = 0; i < terms.length; i++) {
+      var q = terms[i];
+      /* 「#12」是「按序号直达」的显式意图表达 → 精确匹配，不做前缀延伸。
+         否则 #1 会把 #10..#19 一并带出来（子串匹配的必然结果），「直达」就变成了「模糊捞」。 */
+      if (/^#\d+$/.test(q)) {
+        if (('#' + seq) !== q) return { hit: false, nameTerms: [], why: '' };
+        srcs.push('编号');
+        continue;
+      }
+      if (p.all.indexOf(q) < 0) return { hit: false, nameTerms: [], why: '' };
+      if (p.name.indexOf(q) >= 0) { nameTerms.push(q); continue; }
+      /* 多关键词可能分别命中不同域 → 去重收集，标签按固定顺序输出，保证同一查询结果标签稳定 */
+      if (p.date.indexOf(q) >= 0) srcs.push('日期');
+      else if (p.time.indexOf(q) >= 0) srcs.push('时刻');
+      else if (p.id.indexOf(q) >= 0) srcs.push('编号');
+      else srcs.push('详情');
+    }
+    var order = ['日期', '时刻', '编号', '详情'], tags = [];
+    order.forEach(function (s) { if (srcs.indexOf(s) >= 0) tags.push(s); });
+    return { hit: true, nameTerms: nameTerms, why: tags.join('+') };
+  }
+  /* 标题关键词高亮：必须「先定位 → 再切片 → 逐段转义」，不能「先整体转义再替换」——
+     后者会与 &amp; / &#39; 这类实体互相干扰（替换位置错位、甚至把实体从中间切开）。
+     重叠区间先合并，避免嵌套 <mark> 产出非法结构。 */
+  function hlName(name, terms) {
+    var s = String(name == null ? '' : name);
+    if (!terms || !terms.length) return esc(s);
+    var low = s.toLowerCase(), rs = [];
+    terms.forEach(function (q) {
+      if (!q) return;
+      var from = 0, p;
+      while ((p = low.indexOf(q, from)) >= 0) { rs.push([p, p + q.length]); from = p + q.length; }
+    });
+    if (!rs.length) return esc(s);
+    rs.sort(function (a, b) { return a[0] - b[0] || b[1] - a[1]; });
+    var mg = [];
+    rs.forEach(function (r) {
+      var last = mg[mg.length - 1];
+      /* 只合并「真重叠」：首尾相接（[0,2] 与 [2,4]）视为两个词各自的命中，保持标记粒度与词一一对应 */
+      if (last && r[0] < last[1]) last[1] = Math.max(last[1], r[1]);
+      else mg.push([r[0], r[1]]);
+    });
+    var out = '', cur = 0;
+    mg.forEach(function (r) {
+      out += esc(s.slice(cur, r[0])) + '<mark class="gv-hl">' + esc(s.slice(r[0], r[1])) + '</mark>';
+      cur = r[1];
+    });
+    return out + esc(s.slice(cur));
+  }
+
   /* ---------- 主挂载 ---------- */
   function mount(container, ganttCode, eventsData) {
     if (!container) return null;
@@ -619,7 +770,18 @@
       '      <span class="gv-lttl">事件列表</span><span class="cnt" id="gv-lcnt"></span>' +
       '      <span style="flex:1"></span>' +
       '    </div>' +
+      '    <div class="gv-lsearch" id="gv-lsearch">' +
+      '      <div class="box"><span class="ico">🔍</span>' +
+      '        <input id="gv-lq" type="text" role="searchbox" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="搜索事件或时间点" placeholder="搜索事件 / 时间点…" title="名称关键词（空格分隔＝同时满足）· 日期 9.11 / 09-11 / 2026-09 / #序号 · 时刻 08:00 · 也可搜详情（地点/负责人/备注）">' +
+      '        <button type="button" class="clr" id="gv-lclr" title="清空搜索" aria-label="清空搜索">✕</button></div>' +
+      '      <div class="gv-lchips" id="gv-lchips">' +
+      '        <button type="button" data-ftype="all" title="不限类型">全部</button>' +
+      '        <button type="button" data-ftype="event" title="只看事件（时间段）">事件</button>' +
+      '        <button type="button" data-ftype="point" title="只看时间点（◆ 当日点 / 里程碑）">时间点</button>' +
+      '      </div>' +
+      '    </div>' +
       '    <div class="gv-lbox" id="gv-lbox"></div>' +
+      '    <div class="gv-lfoot" id="gv-lfoot"></div>' +
       '  </div>' +
       '  <div class="gv-scroll" id="gv-scroll"><svg id="gv-svg"></svg></div>' +
       '</div>';
@@ -634,6 +796,21 @@
     var scrollEl = root.querySelector('#gv-scroll');
     var svgEl = root.querySelector('#gv-svg');
     var legendEl = root.querySelector('#gv-legend');
+    /* v34 左栏搜索控件 */
+    var lsearchEl = root.querySelector('#gv-lsearch');
+    var lqEl = root.querySelector('#gv-lq');
+    var lclrEl = root.querySelector('#gv-lclr');
+    var lchipsEl = root.querySelector('#gv-lchips');
+    var lfootEl = root.querySelector('#gv-lfoot');
+    /* 搜索控件外观同步（清空按钮显隐 + 类型档选中态）：只改 class，不重建 DOM，
+       所以可以在「输入过程中」高频调用而不打断输入焦点。 */
+    function syncSearchUI() {
+      if (lsearchEl) lsearchEl.classList.toggle('hasq', lqEl.value.length > 0);
+      var bs = lchipsEl.querySelectorAll('[data-ftype]');
+      for (var i = 0; i < bs.length; i++) {
+        bs[i].classList.toggle('on', bs[i].getAttribute('data-ftype') === searchType);
+      }
+    }
 
     /* 轻量提示条：3.4s 自动消失（Ctrl+S 保存反馈、系统提醒通道反馈等共用） */
     var toastEl = null, toastTimer = null;
@@ -670,7 +847,7 @@
     var seqById = {};
     model.all.forEach(function (t, i) { seqById[t.id] = i + 1; });
     var labelRowByTask = {};
-    /* ---- 左侧事件列表（v33：平铺 + 最新修改在最上面） ----
+    /* ---- 左侧事件列表（v33：平铺 + 最新修改在最上面；v34：搜索过滤 + 关键词高亮） ----
        为什么不再按 section 分区：
          section（阶段）是**数据组织维度**，不是用户此刻要处理的东西。同学打开左栏是为了
          「找到某件事 → 点开看要做啥」，而「分布在哪个阶段」对他来说没有检索价值 ——
@@ -694,33 +871,166 @@
       o[id] = Date.now();
       saveModTs(o);
     }
+    /* ---- v34 搜索状态（左栏「搜索事件 / 时间点」） ----
+       只保留「原始查询串 + 类型档」两个状态，DOM 每次重建都从状态推 ——
+       这样 toggleCourse / applyData / 保存后刷新等任何一次 buildLabelList() 都不会把搜索条件弄丢。 */
+    var searchQ = '';            /* 用户原始输入（匹配时才做归一：小写 + 空格分词） */
+    var searchType = 'all';      /* all | event | point —— 与关键词是「与」关系，切档不会清空关键词 */
+    var searchHitIds = {};       /* 命中 id 集合：SVG 叠加层与 debug 口只读消费 */
+    var firstHitTask = null;     /* 回车直达：当前过滤结果的第一条 */
+    function searchActive() { return searchTerms(searchQ).length > 0 || searchType !== 'all'; }
     function buildLabelList() {
       lboxEl.innerHTML = '';
       labelRowByTask = {};
+      searchHitIds = {};
+      firstHitTask = null;
       var vis = visibleTasks();
       var modTs = loadModTs();
+      var terms = searchTerms(searchQ);
+      var q = terms.length ? searchQ : '';
       var ordered = vis.slice().sort(function (a, b) {
         var ta = modTs[a.id] || 0, tb = modTs[b.id] || 0;
         if (ta !== tb) return tb - ta;                                  /* 最新修改在前 */
         return (seqById[a.id] || 0) - (seqById[b.id] || 0);              /* 同为「未改过」→ 按 gantt.md 原序 */
       });
+      var shown = 0;
       ordered.forEach(function (t) {
         var isPt = !!(t.milestone || t.point);
+        /* 类型档：与关键词同时生效（过滤条件互相叠加，不互相清空 —— 搜索控件的既有约定） */
+        if (searchType === 'event' && isPt) return;
+        if (searchType === 'point' && !isPt) return;
+        var hits = null;
+        if (q) {
+          var ev = eventsData[t.id] || courseDetailOf(t) || null;
+          hits = searchHits(t, q, seqById[t.id], ev);
+          if (!hits.hit) return;
+        }
         var dot = isPt ? '<span class="dot">◆</span>' : '<span class="dot">▪</span>';
         /* v33：平铺后每条都带上第 4 位序号 + 类型角标，避免「丢了分区头」后无法区分事件与时间点、
            也无法对应「#序号」这一既有约定（详情页 ID 就写作 #序号） */
         var badge = '<span class="kbadge' + (isPt ? ' pt' : '') + '">' + (isPt ? '时间点' : '事件') + '</span>';
+        /* 「为什么它会命中」：关键词不在标题里（命中的是日期或详情）时给一个来源角标，
+           否则用户看到一条标题里没有关键词的结果会以为搜索坏了 */
+        var why = (hits && hits.why) ? '<span class="gv-why" title="关键词不在标题里，命中该条目的' + hits.why + '">' + hits.why + '命中</span>' : '';
         var cell = el('div', 'gv-lname',
           dot +
-          '<span class="nm"><b>' + esc(t.name) + '</b>' +
-          '<span class="dt"><span class="sq">#' + (seqById[t.id] || '') + '</span>' + esc(ymdRange(t)) + badge + '</span></span>');
+          '<span class="nm"><b>' + (hits ? hlName(t.name, hits.nameTerms) : esc(t.name)) + '</b>' +
+          '<span class="dt"><span class="sq">#' + (seqById[t.id] || '') + '</span>' + esc(ymdRange(t)) + badge + why + '</span></span>');
         cell.addEventListener('click', function () { openDetail(t, true); });
         lboxEl.appendChild(cell);
         labelRowByTask[t.id] = cell;
+        /* 命中集合只在「过滤真的生效时」收集：空搜索 + 全部档下若把它填满，
+           图上会给 150+ 条全部套上琥珀虚线轮廓 —— 默认视图会被污染。 */
+        if (searchActive()) searchHitIds[t.id] = true;
+        if (!firstHitTask) firstHitTask = t;
+        shown++;
       });
-      lcntEl.textContent = vis.length;
+      if (!shown) {
+        /* 空状态必须说清楚「为什么空」+「下一步怎么试」，不能只留一个空白列表 */
+        var scope = searchType === 'point' ? '时间点' : (searchType === 'event' ? '事件' : '事件/时间点');
+        var emptyEl = el('div', 'gv-lnmatch');
+        emptyEl.innerHTML = terms.length
+          ? '没有匹配「<b>' + esc(String(searchQ).trim()) + '</b>」的' + scope +
+            '<br>可试：名称关键词 · 日期 9.11 / 09-11 · #序号 · 时刻 08:00'
+          : '当前类型档下没有' + scope;
+        lboxEl.appendChild(emptyEl);
+      }
+      lboxEl.scrollTop = 0;   /* 每次过滤都回到顶部：否则用户改关键词后会停在上一轮的滚动位置看不到结果 */
+      /* 头部计数徽标：搜索/筛选中显示「命中 N / 总数」（E2E 与用户共用这一个读数口），否则只显示总数 */
+      lcntEl.textContent = searchActive() ? (shown + ' / ' + vis.length) : String(vis.length);
+      lcntEl.style.color = (searchActive() && shown === 0) ? '#dc2626' : '';
+      syncSearchUI();
     }
     buildLabelList();
+
+    /* ---- v34 搜索交互（输入框 / 清空 / 类型档 / 回车 / Esc） ----
+       为什么用 input 事件 + 130ms 防抖而不是 keyup：input 能覆盖「粘贴 / 手机键盘候选 /
+       输入法一次性提交」，keyup 只认物理按键；130ms 落在「客户端小列表」的推荐区间（0-150ms），
+       输入停顿即出结果，同时避免逐键重绘整张 SVG（命中叠加层跟随搜索变化，需要一起重绘）。 */
+    var searchTimer = null;
+    function applySearch() {
+      buildLabelList();
+      redraw(centerDate());   /* 命中叠加层（#gv-searchhits）跟随搜索实时刷新 */
+    }
+    function scheduleSearch() {
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { searchTimer = null; applySearch(); }, 130);
+    }
+    lqEl.addEventListener('input', function (ev) {
+      searchQ = lqEl.value;
+      syncSearchUI();
+      /* 中文输入法组字阶段（isComposing）不重建列表：候选窗还会变，提前过滤会闪 */
+      if (ev && ev.isComposing) return;
+      scheduleSearch();
+    });
+    lqEl.addEventListener('compositionend', function () {
+      searchQ = lqEl.value;
+      if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+      applySearch();
+    });
+    lqEl.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        if (lqEl.value) { lqEl.value = ''; searchQ = ''; applySearch(); }
+        else lqEl.blur();
+        return;
+      }
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        if (firstHitTask) openDetail(firstHitTask, true);   /* 回车 = 打开第一条命中（含定位+高亮） */
+      }
+    });
+    lclrEl.addEventListener('click', function () {
+      lqEl.value = ''; searchQ = '';
+      applySearch();
+      lqEl.focus();
+    });
+    lchipsEl.addEventListener('click', function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest('[data-ftype]') : null;
+      if (!b) return;
+      searchType = b.getAttribute('data-ftype') || 'all';
+      applySearch();
+    });
+    /* 定位首条命中：复用「点左侧条目」的既有动作（滚动定位 + 闪烁 + 行选中），但不弹详情 ——
+       这个动作回答的是「它在图上的哪儿」，不是「它写了什么」。 */
+    function locateHit(task) {
+      if (!task) return;
+      scrollToCenter(task.start);
+      flashTask(task.id);
+      Object.keys(labelRowByTask).forEach(function (id) { labelRowByTask[id].classList.remove('active'); });
+      if (labelRowByTask[task.id]) labelRowByTask[task.id].classList.add('active');
+    }
+    /* 底部定位条：有命中才出现；命中全在当前视野外 → 可点「定位首条」，否则只提示「已圈出 N 条」。
+       视野边界直接用 scrollLeft 反推（含 LEFT_PAD 偏移），比拿 viewDays/2 对称估算更准：
+       scrollToCenter 把目标放在 38% 处、两端还会夹紧，对称估算在边界附近会误判成「在视野内」。 */
+    function syncSearchFoot() {
+      if (!lfootEl) return;
+      var ids = Object.keys(searchHitIds);
+      if (!ids.length) {
+        lfootEl.className = 'gv-lfoot';
+        lfootEl.innerHTML = '';
+        lfootEl.onclick = null;
+        return;
+      }
+      var px = pxPerDay();
+      var s0 = addDays(minDate, (scrollEl.scrollLeft - LEFT_PAD) / px);
+      var s1 = addDays(minDate, (scrollEl.scrollLeft + pw() - LEFT_PAD) / px);
+      var anyInView = false;
+      for (var i = 0; i < ids.length; i++) {
+        var t = model.byId ? model.byId(ids[i]) : null;
+        if (!t) continue;
+        if (t.start <= s1 && (t.end || t.start) >= s0) { anyInView = true; break; }
+      }
+      if (!anyInView) {
+        lfootEl.className = 'gv-lfoot on away';
+        lfootEl.innerHTML = '⚠ 命中 ' + ids.length + ' 条都在当前视野外 · 点此定位首条';
+        lfootEl.onclick = function () { locateHit(firstHitTask); };
+      } else {
+        lfootEl.className = 'gv-lfoot on';
+        lfootEl.innerHTML = '◉ 图上已圈出 ' + ids.length + ' 条命中（琥珀虚线）';
+        lfootEl.onclick = null;
+      }
+    }
 
     /* 左列折叠（默认折叠） */
     function setLabelsCollapsed(collapsed) {
@@ -973,6 +1283,10 @@
       /* ================= 绘制事件（两遍：先画条收集占用矩形，再放里程碑与防重叠标注） ================= */
       var barRects = [];    // 已画元素占用 {x1,y1,x2,y2}
       var labelRects = [];  // 已放文字占用（条内文字按整条保守占位）
+      /* v34：搜索命中的几何（条 / 菱形点），最后统一画到最上层的 #gv-searchhits 叠加组里。
+         为什么单独收一遍再画：命中描边不能进 barRects（否则会改变既有标注的避让结果），
+         也不能参与配色计算 —— 必须对原有排布零影响。 */
+      var hitGeos = [];
       function rHit(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
         return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
       }
@@ -1011,6 +1325,7 @@
         var barY = cy - hBar / 2;
         var rb = isRainbow(t);
         var strokeW = (isFlash ? 2.5 : (t.crit ? 1.8 : 1));
+        if (searchHitIds[t.id]) hitGeos.push({ k: 'bar', x: x1, y: barY, w: w, h: hBar });
         /* 近期命中 → 双层描边：底层同色描边 + 外层 3.5px 红色渐变描边（与今日线同色，边缘向外扩展 3.5px） */
         if (rb) {
           var hh = Math.max(hBar + 7, 20);
@@ -1170,6 +1485,7 @@
           S += '<g class="gv-bar' + flashCls + '" data-id="' + id + '"><title>' + esc(captionOf(t)) + '</title>' + extra +
             '<path d="M' + x1.toFixed(1) + ',' + (cy - sz).toFixed(1) + ' L' + (x1 + sz).toFixed(1) + ',' + cy.toFixed(1) + ' L' + x1.toFixed(1) + ',' + (cy + sz).toFixed(1) + ' L' + (x1 - sz).toFixed(1) + ',' + cy.toFixed(1) + ' Z" fill="' + dCol + '" stroke="' + dStroke + '" stroke-width="' + dWid + '"/></g>';
           barRects.push({ x1: x1 - sz - 2, y1: cy - sz - 2, x2: x1 + sz + 2, y2: cy + sz + 2 });
+          if (searchHitIds[t.id]) hitGeos.push({ k: 'pt', x: x1, y: cy, r: sz });
           /* 点旁名称标注：「名称(日期)」完整形态，撞条/撞字自动让位；过宽则降级截断，仍强制显示 */
           var capF = captionOf(t);
           if (estW(capF, 10.5) > 260) capF = shortCaption(t, 240, 10.5);
@@ -1178,6 +1494,29 @@
         }
         /* 过窄条（w<=24，已在第一遍放置条尾外置）→ 无需重复 */
       });
+      /* ---- 搜索命中叠加层（v34）：琥珀色虚线轮廓标出「搜到的在图的什么位置」----
+         三条纪律：① 画在最顶层但不吃指针事件（pointer-events="none"，原有条/点/文字的点击与
+         配色一概不变）；② 不受空搜索影响（无查询时该组不存在，既有 E2E 断言零影响）；
+         ③ 虚线而非实线 —— 紫色实线已被「关键节点」占用，实线描边会被误读成数据本身。 */
+      if (hitGeos.length) {
+        var ov = '<g id="gv-searchhits" pointer-events="none">';
+        hitGeos.forEach(function (g) {
+          if (g.k === 'bar') {
+            var ow = g.w + 3, oh = g.h + 3;
+            ov += '<rect x="' + (g.x - 1.5).toFixed(1) + '" y="' + (g.y - 1.5).toFixed(1) +
+              '" width="' + ow.toFixed(1) + '" height="' + oh.toFixed(1) +
+              '" rx="' + Math.min(6, oh / 2).toFixed(1) + '" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="3 2"/>';
+          } else {
+            var r2 = g.r + 2.5;
+            ov += '<path d="M' + g.x.toFixed(1) + ',' + (g.y - r2).toFixed(1) +
+              ' L' + (g.x + r2).toFixed(1) + ',' + g.y.toFixed(1) +
+              ' L' + g.x.toFixed(1) + ',' + (g.y + r2).toFixed(1) +
+              ' L' + (g.x - r2).toFixed(1) + ',' + g.y.toFixed(1) +
+              ' Z" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="3 2"/>';
+          }
+        });
+        S += ov + '</g>';
+      }
       svgEl.innerHTML = S;
 
       /* 事件委托（点击条/菱形/外置标题文字/引线） */
@@ -1190,6 +1529,7 @@
 
       if (centerDate) scrollToCenter(centerDate);
       updateRange();
+      syncSearchFoot();   /* 视野变化后刷新「命中是否在视野内」的定位条 */
     }
 
     function scrollToCenter(cd) {
@@ -2923,6 +3263,7 @@
         if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
         if (bootSyncTimer) { clearTimeout(bootSyncTimer); bootSyncTimer = null; }
         if (nowTimer) { clearInterval(nowTimer); nowTimer = null; }
+        if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
         if (mask) { mask.remove(); drawer.remove(); }
         container.removeChild(root);
         container.removeChild(styleEl);
@@ -2939,6 +3280,25 @@
         return model.all.map(function (t) {
           return { id: t.id, name: t.name, isPoint: !!(t.milestone || t.point) };
         });
+      },
+      /* v34：搜索口 —— setSearch 等价于「在左栏输入框里键入 + 切类型档」（供 E2E 与外部一次设定）；
+         searchInfo 是只读自检口：当前查询 / 类型档 / 命中 id 清单 / 列表实际行数 / 图上叠加层是否存在。
+         二者都不参与渲染逻辑，返回的都是值的快照，外部改不动内部状态。 */
+      setSearch: function (q, type) {
+        lqEl.value = (q == null ? '' : String(q));
+        searchQ = lqEl.value;
+        if (type === 'all' || type === 'event' || type === 'point') searchType = type;
+        applySearch();
+        return { q: searchQ, type: searchType, rows: lboxEl.querySelectorAll('.gv-lname').length };
+      },
+      searchInfo: function () {
+        var ids = [];
+        Object.keys(searchHitIds).forEach(function (k) { ids.push(k); });
+        return {
+          q: searchQ, type: searchType, active: searchActive(), hits: ids,
+          rows: lboxEl.querySelectorAll('.gv-lname').length,
+          overlay: !!svgEl.querySelector('#gv-searchhits')
+        };
       }
     };
   }
@@ -2947,5 +3307,8 @@
   return { mount: mount, rangeCN: rangeCN, fmtPt: fmtPt, hmOf: hmOf, captionOf: captionOf, shortCaption: shortCaption,
     alarmHMOf: alarmHMOf, alarmWhenOf: alarmWhenOf, alarmAtOf: alarmAtOf, alarmLeadMin: ALARM_LEAD_MIN,
     alarmLabelOf: alarmLabelOf, alarmLabelSep: ALARM_LABEL_SEP,
-    evKeysOf: evKeysOf, evDriftKeys: evDriftKeys };
+    evKeysOf: evKeysOf, evDriftKeys: evDriftKeys,
+    /* v34 搜索匹配：纯函数出口（test/unit.js 直接断言匹配语义，无需 DOM） */
+    searchTerms: searchTerms, searchParts: searchParts, searchHits: searchHits,
+    hlName: hlName, dateHayOf: dateHayOf, evTextOf: evTextOf };
 });

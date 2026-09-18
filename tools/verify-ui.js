@@ -300,6 +300,210 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     if (box) box.scrollTop = 0;
   });
 
+  console.log('[3c] 左栏搜索（v34：名称 / 日期 / 时刻 / 编号 / 详情 · 类型档 · 高亮 · 图上圈出）');
+  /* 行取数器：一次取回「标题 / 序号 / 类型角标 / 来源标签 / 高亮标记数」，
+     分多次 $$eval 会在防抖重绘的间隙读到前后不一致的快照。 */
+  const srRows = () => page.$$eval('#gv-lbox .gv-lname', els => els.map(e => ({
+    name: (e.querySelector('.nm b') || {}).textContent || '',
+    seq: (e.querySelector('.sq') || {}).textContent || '',
+    badge: (e.querySelector('.kbadge') || {}).textContent || '',
+    why: (e.querySelector('.gv-why') || {}).textContent || '',
+    marks: e.querySelectorAll('mark.gv-hl').length
+  })));
+  const srCnt = () => page.$eval('#gv-lcnt', e => e.textContent.trim());
+  /* 输入有 130ms 防抖（客户端小列表的推荐区间）→ 断言前等条件成立，而不是死等固定时长 */
+  async function srWait(pred, tries) {
+    for (let i = 0; i < (tries || 40); i++) {
+      const r = await srRows();
+      if (pred(r)) return r;
+      await page.waitForTimeout(100);
+    }
+    return await srRows();
+  }
+  /* ⚠️ 输入后必须先「越过防抖窗口」再取数：否则 srWait 会立刻被上一轮的旧快照满足，
+     断言读到的是上一次查询的结果（本轮实测：编号/日期/详情三条角标断言集体假红）。 */
+  async function srFill(q) {
+    await page.fill('#gv-lq', q);
+    await page.waitForTimeout(280);
+  }
+  const srFirstTasks = await page.evaluate(() => window.__ganttViewer.debugTasks());
+  const srAll = await srRows();
+  const srTotal = srAll.length;
+  check(srTotal > 0, '搜索前左栏共 ' + srTotal + ' 条（作为过滤基数）');
+  const srDom = await page.evaluate(() => {
+    const box = document.querySelector('#gv-lsearch'), inp = document.querySelector('#gv-lq');
+    return {
+      hasBox: !!box, visible: !!(box && box.offsetHeight > 0),
+      ph: inp ? inp.getAttribute('placeholder') : '', aria: inp ? inp.getAttribute('aria-label') : '',
+      chips: Array.prototype.slice.call(document.querySelectorAll('#gv-lchips [data-ftype]'))
+        .map(b => ({ t: b.textContent.trim(), on: b.classList.contains('on') })),
+      ov: document.querySelectorAll('#gv-searchhits').length
+    };
+  });
+  check(srDom.hasBox && srDom.visible, '左栏展开后出现搜索框（占位文案「' + srDom.ph + '」）');
+  check(/搜索/.test(srDom.aria || ''), '搜索框带 aria-label（' + srDom.aria + '）');
+  check(srDom.chips.length === 3 && srDom.chips[0].on,
+    '类型档「' + srDom.chips.map(c => c.t).join('/') + '」，默认「全部」选中');
+  check(srDom.ov === 0, '未搜索时图上没有命中叠加层（默认视图零影响，实际 ' + srDom.ov + ' 个）');
+
+  /* ① 名称：关键词取自真实数据（首条任务名的前两字），不写死任何名称 */
+  const srKw = String(srFirstTasks.filter(t => t.name && t.name.length >= 4)[0].name).slice(0, 2);
+  await srFill(srKw);
+  const srNameRows = await srWait(r => r.length > 0 && r.length < srTotal);
+  check(srNameRows.length > 0 && srNameRows.length < srTotal,
+    '关键词「' + srKw + '」把 ' + srTotal + ' 条过滤到 ' + srNameRows.length + ' 条');
+  check(srNameRows.every(r => r.name.indexOf(srKw) >= 0 || r.why),
+    '结果每条要么标题含关键词、要么带来源角标（无「看不懂为什么搜出来」的行）');
+  check(srNameRows.some(r => r.marks > 0), '标题里的关键词被标黄高亮（<mark class="gv-hl">）');
+  check(srNameRows.every(r => r.name.indexOf(srKw) >= 0 || r.marks === 0),
+    '高亮只出现在真正含关键词的标题上');
+  const srCntA = await srCnt();
+  check(srCntA === srNameRows.length + ' / ' + srTotal,
+    '头部计数切换为「命中 N / 总数」（实际「' + srCntA + '」）');
+  const srOvCount = await page.$$eval('#gv-searchhits rect, #gv-searchhits path', els => els.length);
+  check(srOvCount > 0, '图上画出琥珀虚线命中轮廓（' + srOvCount + ' 个）');
+  check(srOvCount >= srNameRows.length, '命中轮廓数量覆盖全部命中条目（' + srOvCount + ' ≥ ' + srNameRows.length + '）');
+  check((await page.evaluate(() => window.__ganttViewer.searchInfo().overlay)) === true,
+    'searchInfo().overlay = true（只读自检口与 DOM 一致）');
+  check(await page.$eval('#gv-lsearch', e => e.classList.contains('hasq')), '有输入时清空按钮（✕）显示');
+
+  /* 定位条：命中都在视野外时，图上轮廓「等于没圈」→ 必须给出「点此定位首条」的出路 */
+  const srFoot = await page.evaluate(() => {
+    const f = document.querySelector('#gv-lfoot');
+    return { on: f.classList.contains('on'), away: f.classList.contains('away'), tx: f.textContent.trim() };
+  });
+  check(srFoot.on && /视野外|已圈出/.test(srFoot.tx), '列表底部给出命中定位条（「' + srFoot.tx + '」）');
+  if (srFoot.away) {
+    await page.click('#gv-lfoot');
+    await page.waitForTimeout(600);
+    const srAfter = await page.evaluate(() => {
+      const f = document.querySelector('#gv-lfoot');
+      const g = document.querySelector('#gv-searchhits rect, #gv-searchhits path');
+      const sc = document.querySelector('#gv-scroll').getBoundingClientRect();
+      const r = g ? g.getBoundingClientRect() : null;
+      return {
+        tx: f.textContent.trim(), away: f.classList.contains('away'),
+        active: (document.querySelector('#gv-lbox .gv-lname.active .nm b') || {}).textContent || '',
+        inside: !!(r && r.left >= sc.left - 2 && r.right <= sc.right + 2)
+      };
+    });
+    check(!srAfter.away && /已圈出/.test(srAfter.tx),
+      '点定位条 → 视野跳到命中处，提示切换为「已圈出」（「' + srAfter.tx + '」）');
+    check(srAfter.active === srNameRows[0].name,
+      '定位后该条在列表里被标为当前选中（' + srAfter.active + '）');
+    check(srAfter.inside, '★ 定位后命中轮廓确实落在可视区内（不是「圈在视野外」）');
+  } else {
+    console.log('   · 命中恰好在当前视野内，跳过「定位首条」分支');
+  }
+
+  /* ② 编号：#序号精确到唯一一条 */
+  const srOne = srNameRows[0];
+  await srFill(srOne.seq);
+  const srIdRows = await srWait(r => r.length === 1);
+  check(srIdRows.length === 1 && srIdRows[0].name === srOne.name,
+    '按 #序号「' + srOne.seq + '」精确定位到唯一一条：' + (srIdRows[0] || {}).name);
+  check(/编号/.test(srIdRows[0].why), '按 #序号命中 → 来源角标「编号」（实际「' + srIdRows[0].why + '」）');
+
+  /* ③ 日期：完整形式 + 「9.5」短形式（同学最常用的写法），期望值从 gantt.md 推导 */
+  const p2s = n => (n < 10 ? '0' : '') + n;
+  const srDt = gModel.all.filter(t => t.name && t.start)[0];
+  const srYmd = srDt.start.getFullYear() + '-' + p2s(srDt.start.getMonth() + 1) + '-' + p2s(srDt.start.getDate());
+  const srMd = (srDt.start.getMonth() + 1) + '.' + srDt.start.getDate();
+  await srFill(srYmd);
+  const srYmdRows = await srWait(r => r.some(x => x.name === srDt.name));
+  check(srYmdRows.some(x => x.name === srDt.name),
+    '按完整日期「' + srYmd + '」搜到该日期的条目（' + srYmdRows.length + ' 条）');
+  check(srYmdRows.some(x => /日期/.test(x.why)), '日期命中带来源角标「日期」');
+  await srFill(srMd);
+  const srMdRows = await srWait(r => r.some(x => x.name === srDt.name));
+  check(srMdRows.some(x => x.name === srDt.name),
+    '按短日期「' + srMd + '」（月.日）同样搜得到（' + srMdRows.length + ' 条）');
+
+  /* ④ 时刻：挑一条「时刻不在标题里」的任务，验证时刻域独立可搜 */
+  const srHmTask = gModel.all.filter(t => t.startTime && String(t.name).indexOf(t.startTime) < 0)[0];
+  if (srHmTask) {
+    await srFill(srHmTask.startTime);
+    const srHmRows = await srWait(r => r.some(x => x.name === srHmTask.name));
+    const hit = srHmRows.filter(x => x.name === srHmTask.name)[0];
+    check(!!hit && /时刻/.test(hit.why),
+      '按开始时刻「' + srHmTask.startTime + '」命中「' + srHmTask.name + '」并标「时刻」（实际「' + (hit ? hit.why : '未命中') + '」）');
+  }
+
+  /* ⑤ 详情：按负责人姓名搜（详情字段，标题里通常没有） */
+  const srEvKey = Object.keys(Events).filter(k => /^b/.test(k) && Events[k] && Events[k].owners && Events[k].owners.length)[0];
+  if (srEvKey) {
+    const srOwner = Events[srEvKey].owners[0].name;
+    await srFill(srOwner);
+    const srEvRows = await srWait(r => r.length > 0);
+    check(srEvRows.some(x => /详情/.test(x.why)),
+      '按负责人「' + srOwner + '」搜到详情命中条目（' + srEvRows.filter(x => /详情/.test(x.why)).length + ' 条带「详情」角标）');
+  }
+
+  /* ⑥ 多关键词 AND：任一不命中 → 整条不进结果，且给出空状态文案 */
+  await srFill(srKw + ' zzz不存在');
+  const srAndRows = await srWait(r => r.length === 0);
+  const srEmptyTxt = await page.$eval('.gv-lnmatch', e => e.textContent.trim()).catch(() => '');
+  check(srAndRows.length === 0 && /没有匹配/.test(srEmptyTxt),
+    '多关键词 AND：一个词不命中 → 0 结果 + 空状态文案（「' + srEmptyTxt.slice(0, 34) + '…」）');
+  check((await srCnt()) === '0 / ' + srTotal, '零命中时计数显示「0 / ' + srTotal + '」（实际「' + (await srCnt()) + '」）');
+
+  /* ⑦ 清空按钮回全量 */
+  await page.click('#gv-lclr');
+  const srClrRows = await srWait(r => r.length === srTotal);
+  check(srClrRows.length === srTotal && (await srCnt()) === String(srTotal),
+    '点 ✕ 清空 → 列表恢复全量 ' + srTotal + ' 条');
+  check(!(await page.$eval('#gv-lsearch', e => e.classList.contains('hasq'))), '清空后 ✕ 隐藏');
+  check((await page.$$eval('#gv-searchhits rect, #gv-searchhits path', els => els.length)) === 0,
+    '清空后图上命中轮廓一并撤掉');
+  check(!(await page.evaluate(() => document.querySelector('#gv-lfoot').classList.contains('on'))),
+    '清空后底部定位条一并隐藏');
+
+  /* ⑧ 类型档：与关键词「与」关系，单独用也能筛 */
+  await page.click('#gv-lchips [data-ftype="point"]');
+  const srPtRows = await srWait(r => r.length > 0 && r.every(x => x.badge === '时间点'));
+  check(srPtRows.length > 0 && srPtRows.every(x => x.badge === '时间点'),
+    '类型档「时间点」→ 结果全是时间点（' + srPtRows.length + ' 条）');
+  await page.click('#gv-lchips [data-ftype="event"]');
+  const srEvtRows = await srWait(r => r.length > 0 && r.every(x => x.badge === '事件'));
+  check(srEvtRows.length > 0 && srEvtRows.every(x => x.badge === '事件'),
+    '类型档「事件」→ 结果全是事件（' + srEvtRows.length + ' 条）');
+  check(srPtRows.length + srEvtRows.length === srTotal,
+    '两档条数之和 = 全部（' + srPtRows.length + ' + ' + srEvtRows.length + ' = ' + srTotal + '）');
+
+  /* ⑨ 回车直达：打开第一条命中的详情（含定位+闪烁） */
+  await page.click('#gv-lchips [data-ftype="all"]');
+  await srFill(srKw);
+  const srEnterRows = await srWait(r => r.length > 0 && r.length < srTotal);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.gv-drawer.on', { timeout: 5000 });
+  const srDhead = await page.$eval('.gv-drawer .gv-dhead', e => e.textContent.trim());
+  check(srDhead === srEnterRows[0].name,
+    '回车打开第一条命中的详情（列表首条「' + srEnterRows[0].name + '」= 弹窗标题「' + srDhead + '」）');
+  await page.click('.gv-drawer .gv-close');
+  await page.waitForTimeout(260);
+
+  /* ⑩ Esc：输入框内按 Esc 清空并恢复全量 */
+  await srFill(srKw);
+  await srWait(r => r.length < srTotal);
+  await page.keyboard.press('Escape');
+  const srEscRows = await srWait(r => r.length === srTotal);
+  check(srEscRows.length === srTotal && (await page.$eval('#gv-lq', e => e.value)) === '',
+    'Esc 清空关键词并恢复全量列表（' + srEscRows.length + ' 条）');
+
+  /* ⑪ 折叠左栏时搜索区一并隐藏（不能留一条点不动的输入框在 34px 窄条里） */
+  await page.evaluate(() => window.__ganttViewer.toggleLabels());
+  await page.waitForTimeout(250);
+  const srCollapsed = await page.evaluate(() => {
+    const box = document.querySelector('#gv-lsearch');
+    return { hidden: !box || box.offsetHeight === 0, w: document.querySelector('#gv-labels').offsetWidth };
+  });
+  check(srCollapsed.hidden, '折叠左栏 → 搜索区隐藏（栏宽 ' + srCollapsed.w + 'px）');
+  await page.evaluate(() => window.__ganttViewer.toggleLabels());
+  await page.waitForTimeout(250);
+  check(await page.evaluate(() => document.querySelector('#gv-lsearch').offsetHeight > 0), '再次展开 → 搜索区回来');
+  check(errors.length === 0,
+    '搜索交互全程无 pageerror / console.error' + (errors.length ? '（' + errors.slice(0, 2).join(' | ') + '）' : ''));
+
   console.log('[4] 今日截止提醒面板（v33 口径：截止日期 = 今天）');
   await page.click('[data-act="remind"]');
   await page.waitForSelector('.gv-rem-panel.on', { timeout: 5000 });
