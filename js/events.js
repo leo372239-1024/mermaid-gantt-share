@@ -143,6 +143,20 @@
       sampleUrl: "",
       owners: owners([])
     },
+    b9: {
+      short: "刷网课",
+      who: "",
+      when: "",
+      where: "地点🏫：线上（网页 [https://yjsbjtu.yuketang.cn](https://yjsbjtu.yuketang.cn/) 或“学堂云”App",
+      files: "",
+      steps: ["1. 微信搜索并关注“雨课堂”公众号 → 点“更多”→“身份绑定”","2. 学校选“北京交通大学研究生院”（别选错，否则看不到学分课）","3. 账号：学号；初始密码：bjtu@+学号后四位（如学号26126639，密码bjtu@6639）","4. 登录网页或学堂云App →“我听的课”→ 开始学习，按时完成作业和测验（每道题做完都要点“提交”）","5. 第14教学周内自行安排120分钟完成结课考试"],
+      stepImg: "",
+      attachments: [],
+      tips: "",
+      tipsImg: "",
+      sampleUrl: "",
+      owners: owners([])
+    },
     k1: {
       short: "数据科学与知识工程(周二第1节)",
       who: "选修本课程的同学（课程号 M510028B，课序号 02）",
