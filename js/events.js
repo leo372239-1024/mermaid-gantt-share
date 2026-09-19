@@ -325,20 +325,6 @@
       sampleUrl: "",
       owners: owners([])
     },
-    t31: {
-      short: "网课考试",
-      who: "",
-      when: "2. 考试：第14教学周（12月14日—12月20日），限时120分钟",
-      where: "二 地点🏫：线上（网页 [https://yjsbjtu.yuketang.cn](https://yjsbjtu.yuketang.cn/) 或“学堂云”App）",
-      files: "",
-      steps: [],
-      stepImg: "",
-      attachments: [],
-      tips: "",
-      tipsImg: "",
-      sampleUrl: "",
-      owners: owners([])
-    },
     _roles: ROLES
   };
 });
