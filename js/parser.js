@@ -145,10 +145,25 @@
       }
 
       if (durDays === 0) task.point = true; // 0d → 单日节点
-      if (task.milestone && !task.end && dates.length === 1 && durDays === null) { task.point = true; }
 
       if (dates.length) { task.start = dates[0]; if (dateTimes[0]) task.startTime = dateTimes[0]; }
       if (dates.length > 1) { task.end = dates[1]; if (dateTimes[1]) task.endTime = dateTimes[1]; }
+
+      /* 「时间点」的判定必须**只由 milestone 标志决定**，与写法无关。
+         历史教训（2026-09-19 用户报告「改为时间点后刷新又变回事件」）：
+         同一条时间点在两种等价写法下会得到不同的 point 值 ——
+             `刷网课 :milestone, b9, 2026-09-21, 0d`                    → durDays===0 → point=true
+             `提交入党…截止 :milestone, t32, 2026-09-22 10:00, 2026-09-22 10:00` → 两端日期 → point=false
+         后者正是**编辑表单保存出来的形态**（taskLine 对同日带时刻的时间点写两端时间），
+         于是「表单存一次 → point 变 false；再存一次又变回 true」来回漂移，
+         下游（左栏副行、搜索类型档、详情 chip）判据不一致，用户看到的就是「刷新后类型变了」。
+         正解：milestone 一律视为 point，并把 end 钳到 start，消除歧义。 */
+      if (task.milestone) {
+        task.point = true;
+        task.end = task.start || task.end;
+        /* 时间点只有单一时刻：结束时刻跟随开始时刻（保持既有 `两端同时刻` 写法的可读性） */
+        if (!task.endTime) task.endTime = task.startTime || '';
+      }
 
       if (task.start) {
         if (!task.end) {

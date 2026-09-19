@@ -95,13 +95,29 @@
     var known = {};
     (model.sections || []).forEach(function (sec) { known[sec.name] = true; });
     var sections = (model.sections || []).slice();
-    /* 关键：只有**确实存在**孤立任务（不属于任何已知 section）时才补兜底 section。
-       早先这里无条件 push，导致每次序列化都会凭空多出一个空的「新增事项」——
-       round-trip 后 section 从 9 变 10，gantt.md 每次保存都被写脏（test/unit.js [6] 当场变红）。
-       空 section 没有任何承载价值，不进产物。 */
+    /* 兜底 section 的三种情形（2026-09-19 修复「新增条目被静默丢弃」）：
+       ①无孤立任务 → 什么都不做（凭空造空 section 会把 gantt.md 写脏）；
+       ②有孤立任务且兜底 section 尚不存在 → 在**末尾**新补一个承载它们；
+       ③有孤立任务且兜底 section 已存在 → **把任务并进那个已存在的 section**。
+
+       ③ 是本次修掉的真实数据丢失 bug。线上 gantt.md 因「网页端新增→删除」残留了一个
+       **空的**「新增事项」section（提交 3aea79c 手工清过一次，用户在线新建 t31/t32 后又出现）。
+       旧逻辑写的是 `if (!known[FALLBACK] && orphans.length)`：兜底 section 一旦存在就跳过整段，
+       而 model.orphans 并不在 model.sections 里、下面的 forEach 根本遍历不到它 —— 于是用户
+       新填的条目被静默丢弃，前端却照常弹「已同步」。这正是用户曾报告过的「新增了但图上没有」。
+       注意不能改成「先删掉已存在的空兜底 section 再 push」：那会把它在文件里的**位置**从
+       中间挪到末尾（线上它排在 a1/课表之前），产生无意义 diff。原地并入则位置稳定。 */
     var orphanTasks = (model.orphans || []).filter(function (t) { return t && t.id; });
-    if (!known[FALLBACK_SECTION] && orphanTasks.length) {
-      sections.push({ name: FALLBACK_SECTION, tasks: orphanTasks });
+    if (orphanTasks.length) {
+      if (!known[FALLBACK_SECTION]) {
+        sections.push({ name: FALLBACK_SECTION, tasks: orphanTasks });
+      } else {
+        sections.forEach(function (sec) {
+          if (sec.name === FALLBACK_SECTION) {
+            sec.tasks = (sec.tasks || []).concat(orphanTasks);
+          }
+        });
+      }
     }
     sections.forEach(function (sec) {
       L.push('    section ' + sec.name);

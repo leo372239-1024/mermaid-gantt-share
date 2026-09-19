@@ -714,10 +714,12 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
     /* 全部任务 */
     var tasksAll = model.all;
 
-    /* ---- 课程事件隐藏/显示（v32）：课程日事件 id 形如 k1w09（k=课程号,w=教学周），
-           名字/详情里以「课程表」小节承载。点击工具栏「📚 隐藏课程」一键切换。
-           showCourse=false 时：不渲染课程时间条、左列索引、轨道计算，只保留课程详情可达的普通事件。 */
-    var showCourse = true;
+    /* ---- 课程事件隐藏/显示（v32，v35 起默认隐藏）：课程日事件 id 形如 k1w09（k=课程号,w=教学周），
+           名字/详情里以「课程表」小节承载。点击工具栏「📚 显示课程」一键切换。
+           showCourse=false 时：不渲染课程时间条、左列索引、轨道计算，只保留课程详情可达的普通事件。
+           默认 false（隐藏）——114 条课程日事件会淹没班务大事，先给一个干净的班务视图，
+           需要看课时再点按钮展开。 */
+    var showCourse = false;
     function isCourseTask(t) { return /^k\d+w\d+$/.test((t && t.id) || ''); }
     function visibleTasks() { return showCourse ? tasksAll : tasksAll.filter(function (t) { return !isCourseTask(t); }); }
 
@@ -756,7 +758,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
-      '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认显示）">📚 隐藏课程</button>' +
+      '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认隐藏，只看班务大事）">📚 显示课程</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
       '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
       '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看「今天截止」的待办提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +
@@ -1448,12 +1450,23 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         labelRects.push({ x1: (fan === 'start' ? fx : fx), y1: fy - 7, x2: (fan === 'start' ? fx + wT : fx + wT), y2: fy + 4 });
 
         if (leadTo) {
-          var textEdge = (fan === 'start') ? fx : fx + wT;
-          var midX = (x + textEdge) / 2;
+          /* 引线几何（2026-09-19 修复「时间点与标题之间连线断开」）：
+             旧式写法把折线终点固定在**远端文字边缘**（fan=start 取 fx、fan=end 取 fx+wT），
+             再以 (x + textEdge)/2 作转折点。当文字被 force 兜底放到锚点另一侧
+             （例如 x 很小、文字被 clamp 到 LEFT_PAD 内，其右缘反而越过 x）时，
+             折线会「先离开锚点、再折回文字远端」，中间那段横线被文字本身盖住，
+             视觉上就成了断线。
+             新式写法：从**锚点最近的文字边缘**引出，转折点取两者中点，
+             保证折线永远单调地从菱形指向文字，不存在回头段。 */
+          var tLeft = fx, tRight = fx + wT;                    /* 文字占位的左右边界（与 labelRects 同口径） */
+          var nearest = (Math.abs(tLeft - x) <= Math.abs(tRight - x)) ? tLeft : tRight;
+          var midX = (x + nearest) / 2;
+          /* 竖直段落在两者之间；若文字横跨锚点则退化为短线，避免在文字内部乱穿 */
+          var kneeX = Math.min(Math.max(midX, Math.min(x, nearest)), Math.max(x, nearest));
           S += '<path' + hitAttrs + ' d="M' + x.toFixed(1) + ',' + y.toFixed(1) +
-            ' L' + midX.toFixed(1) + ',' + y.toFixed(1) +
-            ' L' + midX.toFixed(1) + ',' + (fy - 1).toFixed(1) +
-            ' L' + textEdge.toFixed(1) + ',' + (fy - 1).toFixed(1) +
+            ' L' + kneeX.toFixed(1) + ',' + y.toFixed(1) +
+            ' L' + kneeX.toFixed(1) + ',' + (fy - 1).toFixed(1) +
+            ' L' + nearest.toFixed(1) + ',' + (fy - 1).toFixed(1) +
             '" fill="none" stroke="' + col + '" stroke-width="2.3" opacity=".7"/>';
         }
         return true;
@@ -1655,7 +1668,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
           /* 隐藏/显示课程 → 重建左列 + 保持中心重绘 */
           buildLabelList();
           redraw(centerDate());
-          toast(showCourse ? '已显示全部课程事件' : '已隐藏全部课程事件，仅展示非课程安排');
+          toast(showCourse ? '已显示全部课程事件' : '已隐藏全部课程事件，仅展示班务安排');
           return;
       }
       if (target) {
@@ -2727,13 +2740,15 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       var task = opts.task || null;
       var ev = opts.ev || null;
       var isNew = !!opts.isNew;
-      var kind = task ? (task.milestone ? 'milestone' : 'normal') : 'normal';
+      /* v35：不再有 `kind` 变量 —— 类型由「结束日期是否填写」在表单里实时推导（见 syncKind） */
       /* v33：不再有「阶段」下拉，目标 section 由 targetSectionName 自动决定 */
       var secName = targetSectionName(task, isNew);
       var startStr = task ? fmtYMD(task.start) : fmtYMD(today);
-      var endStr = task ? ((task.point || task.milestone) ? '' : fmtYMD(task.end)) : '';
+      /* 时间点（milestone）的结束日期回显为空 —— 这正是「类型 = 时间点」在表单里的表达；
+         编辑一条时间点时，结束日期天然留空 → syncKind 自动判回「时间点」，无需额外状态。 */
+      var endStr = task ? (task.milestone ? '' : fmtYMD(task.end)) : '';
       var startTStr = task ? hmOf(task.startTime) : '';
-      var endTStr = task ? hmOf(task.endTime) : '';
+      var endTStr = task ? (task.milestone ? '' : hmOf(task.endTime)) : '';
       /* 责任班委多选（选项来自 ROLES 表：职务 + 姓名） */
       function ownerBoxes(selected) {
         var roles = eventsData._roles || {};
@@ -2754,12 +2769,16 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         '    <div class="f-col" style="flex:2 1 260px"><label>待办事项名称<input type="text" name="name" required value="' + esc(task ? task.name : '') + '"></label></div>' +
         '  </div>' +
         '  <div class="f-row">' +
-        '    <div class="f-col"><label>类型<select name="kind">' +
-        '      <option value="normal"' + (kind === 'normal' ? ' selected' : '') + '>事件（有开始→结束的时间范围）</option>' +
-        '      <option value="milestone"' + (kind === 'milestone' ? ' selected' : '') + '>时间点（只有单一时刻 ◆）</option>' +
-        '    </select></label>' +
-        /* 类型只剩「事件 / 时间点」两种。「关键节点紫圈」是历史数据的强调标记（gantt.md 里的 crit），
-           不再是可选项；仅当该条原本带这个标记时才给一个开关，避免编辑一次就把标记悄悄丢掉。 */
+        /* v35：类型不再由用户手选，改为**按填写的日期自动判定**（下方 syncKind 实时回写）：
+             只填了开始日期（结束留空）→ 时间点（单一时刻 ◆）；
+             开始 + 结束都填 → 事件（时间段）。
+           这样避免「选了时间点却还留着结束日期」这类自相矛盾的状态，
+           也把「类型」从需要用户理解的概念，降级为一个会自己算出来的结果。 */
+        '    <div class="f-col"><label>类型 <span class="f-hint">（自动判定）</span>' +
+        '      <input type="text" id="gv-kindout" value="" disabled readonly style="background:#f1f5f9;color:#4f46e5;font-weight:600">' +
+        '    </label>' +
+        /* 「关键节点紫圈」是历史数据的强调标记（gantt.md 里的 crit），不再是类型选项；
+           仅当该条原本带这个标记时才给一个开关，避免编辑一次就把标记悄悄丢掉。 */
         (task && task.crit ? '<label class="f-check"><input type="checkbox" name="keepCrit" checked> 保留「关键节点」紫圈标记（历史数据）</label>' : '') +
         '    </div>' +
         '    <div class="f-col"><label>是否已完成<div class="f-radio">' +
@@ -2829,34 +2848,40 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         });
       });
 
-      /* v27：类型联动 —— 类型只剩「事件 / 时间点」两种；时间点 = 单一时刻，
-         结束日期与结束时刻随之禁用并清空（提交时也强制 end = start、endTime 为空）。 */
-      var kindSel = drawer.querySelector('[name=kind]');
+      /* v35：类型自动判定（承接 v27 的「时间点不设结束时间」口径，但**反转驱动方向**）——
+         旧版：用户先选类型 → 选了「时间点」就把结束日期禁用清空。
+         新版：结束日期是否填写**就是**类型本身 ——
+             只有开始日期（结束留空） → 时间点（单一时刻 ◆）
+             开始 + 结束日期都填     → 事件（时间段 ▬）
+         判据只用「结束日期」，因为它才是语义分界；结束时刻是可选细化（同日带时刻仍是事件）。
+         `endTimeIn` 不再随类型禁用 —— 一个时间点本来就不该有结束时刻，
+         但它由「结束日期为空」自然保证（时间点提交时 end=start、endTime 置空）。 */
       var endDateIn = drawer.querySelector('[name=end]');
       var endTimeIn = drawer.querySelector('[name=endTime]');
       var endCol = drawer.querySelector('#gv-endcol');
+      var kindOut = drawer.querySelector('#gv-kindout');
+      function kindOfForm() { return (endDateIn && endDateIn.value) ? 'normal' : 'milestone'; }
       function syncKind() {
-        var isPoint = !!kindSel && kindSel.value === 'milestone';
-        [endDateIn, endTimeIn].forEach(function (i) {
-          if (!i) return;
-          i.disabled = isPoint;
-          if (isPoint) i.value = '';
-        });
-        if (endCol) {
-          endCol.classList.toggle('f-off', isPoint);
-          endCol.querySelectorAll('[data-clear]').forEach(function (b) { b.disabled = isPoint; });
+        var isPoint = (kindOfForm() === 'milestone');
+        if (kindOut) {
+          kindOut.value = isPoint
+            ? '时间点（只有单一时刻 ◆）'
+            : '事件（开始 → 结束的时间段 ▬）';
         }
+        if (endCol) endCol.classList.toggle('f-off', false);   /* 结束日期始终可编辑 —— 它就是类型开关 */
+        if (endTimeIn) endTimeIn.disabled = isPoint;           /* 时间点没有结束时刻 */
         var hint = drawer.querySelector('#gv-endhint');
         if (hint) {
           hint.textContent = isPoint
-            ? '（时间点只有单一时刻，结束时间不可设置）'
-            : '（留空 = 单日；跨天请填结束日期）';
+            ? '（留空 = 时间点 ◆；填写后即为事件）'
+            : '（已填 → 事件 ▬；清空可改回时间点）';
         }
       }
-      if (kindSel) {
-        kindSel.addEventListener('change', syncKind);
-        syncKind();
-      }
+      /* 结束日期变化即重算类型；开始/结束时刻也监听（清空结束日期后需同步禁用态） */
+      [endDateIn, endTimeIn].forEach(function (i) {
+        if (i) i.addEventListener('change', syncKind);
+      });
+      syncKind();
 
       /* v17：示例图上传预览 + 移除（图片仅暂存本地 pending，随「保存更改」统一上传） */
       var sampleFile = drawer.querySelector('[name=sampleFile]');
@@ -3013,7 +3038,6 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
     function handleSubmit(opts, form) {
       var fd = new FormData(form);
       var name = String(fd.get('name') || '').trim();
-      var kind = String(fd.get('kind') || 'normal');
       var completed = String(fd.get('completed') || 'undone');
       var startStr = String(fd.get('start') || '');
       var endStr = String(fd.get('end') || '');
@@ -3021,9 +3045,12 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       var endTStr = String(fd.get('endTime') || '').trim();
       var isEvent = !!fd.get('isEvent');
       if (!name) { showFormErr(form, '名称不能为空'); return; }
-      /* 类型只有两种：事件（normal）/ 时间点（milestone）。关键节点紫圈是历史数据的强调标记，
-         不是类型 —— 只对「原本就带 crit」的条目保留开关，新建条目永不写入 crit。 */
-      var milestone = (kind === 'milestone');
+      /* v35：类型自动判定 —— 判据是「结束日期是否填写」，不再是用户手选的下拉：
+             只填开始日期（结束留空）→ 时间点（milestone）
+             开始 + 结束日期都填     → 事件（时间段）
+         这与表单里 syncKind 的实时回写**同一判据**，保证「所见即所得」。
+         关键节点紫圈是历史数据的强调标记，不是类型 —— 只对「原本就带 crit」的条目保留开关。 */
+      var milestone = !endStr;
       var crit = !!(opts.task && opts.task.crit && fd.get('keepCrit'));
       var start = Admin.parseDate(startStr);
       if (!start) { showFormErr(form, '开始日期无效，请选择有效日期'); return; }
