@@ -41,7 +41,9 @@ console.log('[1] gantt.md 解析');
 const code = readGanttMd();
 const model = Parser.parse(code);
 check(!!model && !!model.range, '解析成功，得到有效时间范围');
-check(model.sections.length === 9, '包含 9 个 section（实际 ' + model.sections.length + '）');
+check(model.sections.length >= 9,
+  '包含 >= 9 个 section（实际 ' + model.sections.length +
+  '；用下界而非定值——网页端「新增条目」会自动补出「新增事项」section，"多少"不是契约）');
 check(model.all.length >= 25, '任务总数 >= 25（实际 ' + model.all.length + '）');
 const fatal = model.warnings.filter(w => /缺少有效日期|未能从代码中解析/.test(w));
 check(fatal.length === 0, '无致命告警（日期缺失/无法解析）');
@@ -117,31 +119,73 @@ check(fieldDiff === 0, 'serializeGantt → parse 字段完全一致（' + model.
 console.log('[6b] v33 兜底 section（新增条目不再选阶段）');
 const FALLBACK = Admin.FALLBACK_SECTION;
 check(typeof FALLBACK === 'string' && FALLBACK.length > 0, 'admin.js 导出兜底 section 名（「' + FALLBACK + '」）');
-/* 基线：无孤立任务时**不得**凭空造出空 section（这是本次修掉的真实 bug：每次保存 gantt.md 都被写脏） */
+
+/* 断言一律基于「相对变化量」而非「绝对 section 数」。
+   历史教训（2026-09-19）：早先这里写死 `sections.length === 9`，而线上 gantt.md 已被
+   网页端写回 10 个 section（多一个「新增事项」），于是每次同步线上数据，测试就无故变红。
+   测试不该把「数据长什么样」当成契约 —— 契约是「序列化不许改坏结构」。 */
+const secBase = model.sections.length;
+const hasFallback = model.sections.some(s => s.name === FALLBACK);
+
+/* 基线：无孤立任务时**不得**凭空造出空 section（这是 v33 修掉的真实 bug：每次保存都把 gantt.md 写脏） */
 const serPlain = Admin.serializeGantt(model);
 const mPlain = Parser.parse(serPlain);
-check(mPlain.sections.length === model.sections.length,
-  '无孤立任务时不新增空 section（' + model.sections.length + ' → ' + mPlain.sections.length + '）');
+check(mPlain.sections.length === secBase,
+  '无孤立任务时不新增空 section（' + secBase + ' → ' + mPlain.sections.length + '）');
 const mPlain2 = Parser.parse(Admin.serializeGantt(mPlain));
 check(mPlain2.sections.length === mPlain.sections.length,
   'serialize → parse → serialize 幂等（section 数稳定在 ' + mPlain2.sections.length + '）');
-/* 有孤立任务时必须补出兜底 section，且任务不丢 —— 「新增了但图上没有」是本次改动的高危场景 */
-const orphanTask = { name: '测试新增条目', id: 'zzTEST', start: new Date(2026, 8, 20), end: new Date(2026, 8, 20), startTime: '', endTime: '', milestone: false, crit: false, done: false, active: false };
-const mOrphan = { title: model.title, sections: model.sections, orphans: [orphanTask] };
-const mOrphan2 = Parser.parse(Admin.serializeGantt(mOrphan));
-check(mOrphan2.sections.length === model.sections.length + 1,
-  '有孤立任务时补出 1 个兜底 section（' + model.sections.length + ' → ' + mOrphan2.sections.length + '）');
+
+/* 有孤立任务时任务绝不能丢 —— 「新增了但图上没有」是本项目的高危场景 */
+const mkOrphan = (id, day) => ({ name: '测试新增条目', id: id, start: new Date(2026, 8, day), end: new Date(2026, 8, day), startTime: '', endTime: '', milestone: false, crit: false, done: false, active: false });
+const orphanTask = mkOrphan('zzTEST', 20);
+
+/* 情形 A：兜底 section 尚不存在 → 新补一个（section 数 +1，且落在末尾） */
+const sectionsNoFb = model.sections.filter(s => s.name !== FALLBACK);
+const mOrphan2 = Parser.parse(Admin.serializeGantt({
+  title: model.title, sections: sectionsNoFb, orphans: [orphanTask]
+}));
+check(mOrphan2.sections.length === sectionsNoFb.length + 1,
+  '兜底 section 不存在时补出 1 个（' + sectionsNoFb.length + ' → ' + mOrphan2.sections.length + '）');
 check(!!mOrphan2.byId('zzTEST'), '孤立任务被写进产物且可被解析回来（不会静默丢失）');
 check(mOrphan2.sections[mOrphan2.sections.length - 1].name === FALLBACK,
   '兜底 section 追加在**末尾**（不打乱既有顺序，避免无意义 diff）');
-/* 兜底 section 已存在时不再重复追加 */
-const mOrphan3 = Parser.parse(Admin.serializeGantt({
-  title: model.title,
-  sections: model.sections.concat([{ name: FALLBACK, tasks: [orphanTask] }]),
-  orphans: [orphanTask]
+
+/* 情形 B：兜底 section 已存在且为空 → **并入**而非跳过。
+   这是 2026-09-19 修掉的真实「静默数据丢失」bug：线上 gantt.md 因「网页端新增→删除」
+   残留了一个空的「新增事项」section，旧逻辑 `!known[FALLBACK] && orphans.length`
+   一见它存在就跳过整段，model.orphans 又不在 sections 里，用户新填的条目于是被
+   悄悄丢掉（前端仍弹「已同步」）。 */
+const emptyFallbackSections = model.sections
+  .filter(s => s.name !== FALLBACK)
+  .concat([{ name: FALLBACK, tasks: [] }]);
+const mReuse = Parser.parse(Admin.serializeGantt({
+  title: model.title, sections: emptyFallbackSections, orphans: [orphanTask]
 }));
-check(mOrphan3.sections.filter(s => s.name === FALLBACK).length === 1,
+check(!!mReuse.byId('zzTEST'),
+  '兜底 section 已存在（空）时，孤立任务**并入**其中而非被丢弃（旧 bug：静默丢失）');
+check(mReuse.sections.filter(s => s.name === FALLBACK).length === 1,
   '兜底 section 已存在时不重复追加（仍为 1 个）');
+check(mReuse.sections.length === emptyFallbackSections.length,
+  '并入不改变 section 总数（' + emptyFallbackSections.length + ' → ' + mReuse.sections.length + '）');
+check(mReuse.sections.findIndex(s => s.name === FALLBACK) === emptyFallbackSections.length - 1,
+  '并入时兜底 section **原地不动**（不挪到末尾，避免无意义 diff）');
+
+/* 情形 C：已有非空兜底 section + 新孤立任务 → 追加，且再存一次幂等（不膨胀） */
+const nonEmptyFallback = model.sections
+  .filter(s => s.name !== FALLBACK)
+  .concat([{ name: FALLBACK, tasks: [mkOrphan('zzOLD', 1)] }]);
+const mAppend = Parser.parse(Admin.serializeGantt({
+  title: model.title, sections: nonEmptyFallback, orphans: [orphanTask]
+}));
+check(!!mAppend.byId('zzOLD') && !!mAppend.byId('zzTEST'),
+  '兜底 section 已有内容时，新旧任务共存（zzOLD + zzTEST 都在）');
+const mAppend2 = Parser.parse(Admin.serializeGantt(mAppend));
+check(mAppend2.sections.length === mAppend.sections.length,
+  '并入后再存一次不膨胀（section 数稳定在 ' + mAppend2.sections.length + '）');
+check(mAppend2.sections.filter(s => s.name === FALLBACK)[0].tasks.length ===
+  mAppend.sections.filter(s => s.name === FALLBACK)[0].tasks.length,
+  '并入后再存一次任务数不重复累加（不产生重复行）');
 
 const tmpPath = path.join(ROOT, 'test', '_events_tmp.js');
 fs.writeFileSync(tmpPath, Admin.serializeEvents(Events), 'utf8');
@@ -504,12 +548,84 @@ const critLine = Admin.taskLine({
   startTime: '', endTime: '', milestone: false, crit: true, done: false, active: false
 });
 check(critLine === '期末考试周 :crit, t8, 2027-01-04, 2027-01-15', 'crit 标记可被保留（' + critLine + '）');
-/* 类型下拉只剩两项：表单里不应再出现 value="crit" 的选项 */
+/* v35：类型不再由用户手选，改为**按填写的日期自动判定**（milestone ⟺ 结束日期留空）。
+   因此表单里不应再出现任何 name="kind" 的类型控件（下拉或单选），
+   取而代之的是一个只读的自动判定显示框 #gv-kindout。 */
 const viewerSrc = fs.readFileSync(path.join(ROOT, 'js', 'viewer.js'), 'utf8');
-const kindOptions = (viewerSrc.match(/<option value="(normal|milestone|crit)"[^>]*>([^<]*)</g) || [])
-  .filter(s => /name="kind"|<option value="(normal|milestone|crit)"/.test(s) && /事件|时间点|关键节点/.test(s));
-check(kindOptions.length === 2 && !/value="crit"/.test(viewerSrc.slice(viewerSrc.indexOf('name="kind"'), viewerSrc.indexOf('name="kind"') + 900)),
-  '类型下拉只有「事件 / 时间点」两项（实测 ' + kindOptions.length + ' 项；无 crit 选项）');
+check(!/name="kind"/.test(viewerSrc), 'v35：表单不再有可手选的「类型」控件（name="kind" 已移除）');
+check(/id="gv-kindout"/.test(viewerSrc), 'v35：类型改为只读的自动判定显示框（#gv-kindout）');
+check(!/\[name=kind\]/.test(viewerSrc) && !/kindSel/.test(viewerSrc), 'v35：不再残留旧的 kind 下拉引用（kindSel）');
+/* 自动判定判据必须与提交侧一致：milestone ⟺ 结束日期留空 */
+const autoKindOf = endStr => (endStr ? 'normal' : 'milestone');
+check(autoKindOf('') === 'milestone' && autoKindOf('2026-09-24') === 'normal',
+  'v35：自动判定判据 —— 只填开始时间 → 时间点；填了开始+结束 → 事件');
+check(/var milestone = !endStr;/.test(viewerSrc),
+  'v35：提交侧按同一判据推导 milestone（milestone = !endStr）');
+
+/* ---- 12b. 「时间点」语义唯一化（修 t32「改类型刷新又变回去」）---- */
+console.log('[12b] 时间点语义唯一化（milestone ⟺ point）');
+/* 事故：同一个「时间点」在两种等价写法下 point 值不一致 ——
+     `:milestone, b9, 2026-09-21, 0d`                            → point = true
+     `:milestone, t32, 2026-09-22 10:00, 2026-09-22 10:00`        → point = false（表单保存出来的形态）
+   两种形态都是「时间点」，下游（左栏副行 / 搜索类型档 / 详情 chip）必须一致。 */
+const ptForms = [
+  '提交入党申请书纸质版截止 :milestone, t32, 2026-09-22 10:00, 2026-09-22 10:00',
+  '刷网课 :milestone, b9, 2026-09-21, 0d',
+  '某节点 :milestone, mx, 2026-09-22 10:00',
+  '某节点2 :milestone, my, 2026-09-22'
+];
+ptForms.forEach((ln, i) => {
+  const t = Parser.parse('gantt\n    section S\n    ' + ln).all[0];
+  check(t.milestone === true && t.point === true,
+    '12b.' + (i + 1) + ' ：milestone 一律 point=true（' + ln.slice(0, 26) + '…）');
+});
+/* 反向：普通事件不得被误标为 point */
+const notPt = Parser.parse('gantt\n    section S\n    X :t1, 2026-09-10 14:00, 2026-09-10 17:00').all[0];
+check(notPt.point === false && notPt.milestone === false, '12b.5：普通事件不被误标为 time point');
+/* 时间点只有单一时刻：两个对端日期必须被钳到同一天 */
+const clamped = Parser.parse('gantt\n    section S\n    X :milestone, mz, 2026-09-22, 2026-09-25').all[0];
+check(Parser.diffDays(clamped.start, clamped.end) === 0,
+  '12b.6：时间点的起止被钳到同一天（end == start）');
+/* 真实数据：全部 milestone 条目 point 必须为 true（防止判据再次漂移） */
+const realMilestones = model.all.filter(t => t.milestone);
+check(realMilestones.length > 0 && realMilestones.every(t => t.point === true),
+  '12b.7：真实数据中全部 ' + realMilestones.length + ' 条 milestone 均为 point=true');
+/* 反向：`0d` 写法（无 milestone 词）也是合法的「当日点」，允许 point=true；
+   但不允许出现「跨天却仍被标 point」的条目（那才是真正的语义错误）。 */
+const zeroDayPts = model.all.filter(t => t.point && !t.milestone);
+check(zeroDayPts.every(t => Parser.diffDays(t.start, t.end) === 0),
+  '12b.8：标 point 的条目全部为当日点（' + zeroDayPts.length + ' 条 0d 写法，起止同日）');
+
+/* ---- 12c. 时间点→事件→时间点 往返稳定（t32 的保存-刷新闭环）---- */
+console.log('[12c] 类型往返稳定（保存 → 刷新 → 再保存）');
+/* 复现用户路径：把一条时间点保存出去，重新解析，再保存一次，形态必须逐字不变 */
+const roundTripPt = {
+  name: '提交入党申请书纸质版截止', id: 't32',
+  start: new Date(2026, 8, 22, 10, 0), end: new Date(2026, 8, 22, 10, 0),
+  startTime: '10:00', endTime: '', milestone: true, crit: false, done: false, active: false
+};
+const out1 = Admin.taskLine(roundTripPt);
+const back1 = Parser.parse('gantt\n    section S\n    ' + out1).all[0];
+check(back1.milestone === true && back1.point === true,
+  '12c.1：时间点保存后重新解析仍是时间点（point=' + back1.point + '）');
+const out2 = Admin.taskLine({
+  name: back1.name, id: back1.id, start: back1.start, end: back1.end,
+  startTime: back1.startTime, endTime: back1.endTime,
+  milestone: back1.milestone, crit: back1.crit, done: back1.done, active: back1.active
+});
+check(out1 === out2, '12c.2：二次保存与首次保存逐字一致（不因刷新而改变类型）');
+/* 事件侧同样往返稳定 */
+const evRound = Admin.taskLine({
+  name: '文艺汇演领票', id: 't25', start: new Date(2026, 8, 10, 14, 0), end: new Date(2026, 8, 10, 17, 0),
+  startTime: '14:00', endTime: '17:00', milestone: false, crit: false, done: false, active: false
+});
+const evBack = Parser.parse('gantt\n    section S\n    ' + evRound).all[0];
+check(evBack.milestone === false && evBack.point === false, '12c.3：事件保存后仍是事件');
+check(Admin.taskLine({
+  name: evBack.name, id: evBack.id, start: evBack.start, end: evBack.end,
+  startTime: evBack.startTime, endTime: evBack.endTime,
+  milestone: evBack.milestone, crit: evBack.crit, done: evBack.done, active: evBack.active
+}) === evRound, '12c.4：事件二次保存逐字一致');
 
 /* ---- 13. 合并写回（保存不再有机会删掉远端条目） ---- */
 console.log('[13] 合并写回护栏（整份覆盖 → 合并）');

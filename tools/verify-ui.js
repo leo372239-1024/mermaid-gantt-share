@@ -514,9 +514,25 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
      但仍保留空态分支：数据侧若当天真的无条目，面板应给出空态文案而非崩溃。 */
   if (whens.length) {
     check(true, '今日截止提醒列表有 ' + whens.length + ' 条');
-    /* 只断言「格式」是分钟级起止，不断言具体时刻：面板内容随数据变化 */
-    check(whens.every(t => /^\d{1,2}\.\d{1,2} \d{2}:\d{2} → \d{1,2}\.\d{1,2} \d{2}:\d{2}$/.test(t)),
-      '每条显示开始→截止（分钟级）：' + whens.join(' | '));
+    /* 只断言「格式」是分钟级起止，不断言具体时刻：面板内容随数据变化。
+       `~` 前缀是**有意的**语义标记 —— 见 js/viewer.js whenTextOf()：
+       条目未显式填写该侧时刻时，日粒度推算值会加 `~`（如「9.11 ~00:00」），
+       以区别于用户真正填过的精确时刻（如「9.14 08:00」）。
+       早先这里写死 /^\d{1,2}\.\d{1,2} \d{2}:\d{2} → …$/ 不接受 `~`，
+       于是「心理测评」这类只给了日期、没给时刻的条目一进面板测试就变红。
+       现在把可选 `~` 纳入格式断言，让「有没有 `~`」自证语义。 */
+    check(whens.every(t => /^\d{1,2}\.\d{1,2} ~?\d{2}:\d{2} → \d{1,2}\.\d{1,2} ~?\d{2}:\d{2}$/.test(t)),
+      '每条显示开始→截止（分钟级，`~` 表示该侧时刻为日粒度推算）：' + whens.join(' | '));
+    /* 反向校验：数据里确实存在「未填时刻」的条目时，`~` 必须真的出现（防止标记被悄悄改掉） */
+    const gBlock = /```mermaid\s*\n([\s\S]*?)\n```/.exec(ganttSrcFull);
+    const allTasks = gBlock ? Parser.parse(gBlock[1].trim()).all : [];
+    const lenientItems = allTasks.filter(t =>
+      (t.startTime && !/^\d{2}:\d{2}$/.test(t.startTime)) ||
+      (t.endTime && !/^\d{2}:\d{2}$/.test(t.endTime)));
+    if (lenientItems.length) {
+      check(whens.some(t => t.indexOf('~') >= 0),
+        '存在「未填时刻」的条目时，面板以 `~` 标记推算时刻（' + lenientItems.length + ' 条候选）');
+    }
     check(chips.some(t => /剩 \d+ (分钟|小时)/.test(t) || /已过点/.test(t)),
       '剩余时长/过点状态明确：' + chips.join(' | '));
   } else {
@@ -744,7 +760,7 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     withWhere.map(i => i.alarmLabel).join(' / ') + '）');
   await page.click('.gv-rem-close');
 
-  console.log('[10] 编辑表单：类型只有两种 / 时间点不可设结束时间 / 时刻可清除');
+  console.log('[10] 编辑表单：类型自动判定（v35）/ 时间点不可设结束时刻 / 时刻可清除');
   /* 走进编辑表单需要「已登录」这一前置（isAdmin 只检查 localStorage 是否有令牌）；
      这里只放一个假令牌 —— 全程不触发任何 GitHub 写操作。用完立即清掉，
      让随后的截图仍是「未登录」的默认态。 */
@@ -754,11 +770,29 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   await page.click('[data-act="add"]');
   await page.waitForSelector('#gv-crudform', { timeout: 5000 });
 
-  const kindOpts = await page.$$eval('[name=kind] option', els => els.map(e => e.textContent.trim()));
-  check(kindOpts.length === 2, '类型下拉只有 2 项（实际 ' + kindOpts.length + ' 项：' + kindOpts.join(' / ') + '）');
-  check(kindOpts.some(t => t.indexOf('事件') >= 0) && kindOpts.some(t => t.indexOf('时间点') >= 0),
-    '两项分别是「事件」与「时间点」');
-  check(!kindOpts.some(t => t.indexOf('关键节点') >= 0), '类型里已无「关键节点」选项');
+  /* v35 需求 4：类型改为**自动判定**，不再是下拉。
+     判据 = 结束日期是否填写：留空 → 时间点 ◆；填写 → 事件 ▬。
+     这里只校验「呈现层」：控件形态、实时文案、以及结束时刻的禁用联动。 */
+  const kindUi = await page.evaluate(() => {
+    const sel = document.querySelector('#gv-crudform [name=kind]');
+    const out = document.querySelector('#gv-kindout');
+    const lbl = Array.prototype.slice.call(document.querySelectorAll('#gv-crudform label'))
+      .map(l => l.textContent.trim()).filter(t => /^类型/.test(t));
+    return {
+      hasSelect: !!sel,
+      hasOut: !!out,
+      outTag: out ? out.tagName : '',
+      outVal: out ? out.value : '',
+      outRO: !!(out && (out.disabled || out.readOnly)),
+      label: lbl[0] || ''
+    };
+  });
+  check(!kindUi.hasSelect, 'v35：类型已不再是下拉控件（name=kind 不存在）');
+  check(kindUi.hasOut && kindUi.outTag === 'INPUT' && kindUi.outRO,
+    'v35：类型改为只读文本框展示（#gv-kindout，' + kindUi.outTag + '，只读' + kindUi.outRO + '）');
+  check(/自动判定/.test(kindUi.label), 'v35：类型标签注明「自动判定」（实际「' + kindUi.label + '」）');
+  check(kindUi.outVal.indexOf('时间点') >= 0,
+    'v35：初始（无结束日期）自动判定为「时间点」（实际「' + kindUi.outVal + '」）');
 
   /* v33 需求 1a：表单取消「阶段」字段 —— 彻底不存在该控件（不是隐藏、不是禁用） */
   const secField = await page.evaluate(() => {
@@ -776,44 +810,48 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   await page.click('[data-clear="startTime"]');
   const stAfter = await page.inputValue('[name=startTime]');
   check(stBefore === '14:00' && stAfter === '', '开始时刻可被清除（' + stBefore + ' → 「' + stAfter + '」）');
-  await page.fill('[name=endTime]', '17:00');
-  const etBefore = await page.inputValue('[name=endTime]');
-  await page.click('[data-clear="endTime"]');
-  const etAfter = await page.inputValue('[name=endTime]');
-  check(etBefore === '17:00' && etAfter === '', '结束时刻可被清除（' + etBefore + ' → 「' + etAfter + '」）');
-  await page.fill('[name=end]', '2026-09-13');
-  const edBefore = await page.inputValue('[name=end]');
+  const edBefore = await page.fill('[name=end]', '2026-09-13').then(() => page.inputValue('[name=end]'));
   await page.click('[data-clear="end"]');
   const edAfter = await page.inputValue('[name=end]');
   check(edBefore === '2026-09-13' && edAfter === '', '结束日期可被清除（' + edBefore + ' → 「' + edAfter + '」）');
 
-  /* 类型联动：时间点 → 结束日期/时刻禁用并清空 */
+  /* v35 自动判定：填结束日期 → 变「事件」，结束时刻解禁 */
   await page.fill('[name=end]', '2026-09-13');
+  await page.waitForTimeout(120);
+  const asEvent = await page.evaluate(() => {
+    const o = document.querySelector('#gv-kindout'), t = document.querySelector('[name=endTime]');
+    const h = document.querySelector('#gv-endhint');
+    return { out: o.value, tDis: t.disabled, hint: h ? h.textContent : '' };
+  });
+  check(asEvent.out.indexOf('事件') >= 0,
+    'v35：填了结束日期 → 自动判定为「事件」（实际「' + asEvent.out + '」）');
+  check(!asEvent.tDis, 'v35：判为事件后结束时刻恢复可填');
+  check(/事件/.test(asEvent.hint), 'v35：结束日期旁说明同步为「已填 → 事件 ▬」（实际「' + asEvent.hint + '」）');
+
+  /* 事件态下结束时刻可正常填写与清除 */
   await page.fill('[name=endTime]', '17:00');
-  await page.selectOption('[name=kind]', 'milestone');
+  const etBefore = await page.inputValue('[name=endTime]');
+  await page.click('[data-clear="endTime"]');
+  const etAfter = await page.inputValue('[name=endTime]');
+  check(etBefore === '17:00' && etAfter === '', '事件态下结束时刻可被清除（' + etBefore + ' → 「' + etAfter + '」）');
+
+  /* 清空结束日期 → 回退为「时间点」，结束时刻被禁用 */
+  await page.click('[data-clear="end"]');
   await page.waitForTimeout(120);
-  const pt = await page.evaluate(() => {
-    const e = document.querySelector('[name=end]'), t = document.querySelector('[name=endTime]');
-    const cs = Array.prototype.slice.call(document.querySelectorAll('#gv-endcol [data-clear]'));
-    return { eDis: e.disabled, tDis: t.disabled, eVal: e.value, tVal: t.value, clearDis: cs.map(b => b.disabled), n: cs.length };
+  const backPt = await page.evaluate(() => {
+    const o = document.querySelector('#gv-kindout'), t = document.querySelector('[name=endTime]');
+    const h = document.querySelector('#gv-endhint');
+    return { out: o.value, tDis: t.disabled, hint: h ? h.textContent : '' };
   });
-  check(pt.eDis && pt.tDis, '类型=时间点 → 结束日期与结束时刻均被禁用');
-  check(pt.eVal === '' && pt.tVal === '', '类型=时间点 → 已填入的结束日期/时刻被清空');
-  check(pt.n === 2 && pt.clearDis.every(Boolean), '时间点下两个结束侧的「清除」按钮一并禁用（' + pt.n + ' 个）');
-  const hint = await page.$eval('#gv-endhint', e => e.textContent);
-  check(/时间点/.test(hint), '结束日期旁给出「时间点不需要结束时间」的说明（实际「' + hint + '」）');
-  /* 切回事件 → 恢复可填 */
-  await page.selectOption('[name=kind]', 'normal');
-  await page.waitForTimeout(120);
-  const back = await page.evaluate(() => {
-    const e = document.querySelector('[name=end]'), t = document.querySelector('[name=endTime]');
-    return { eDis: e.disabled, tDis: t.disabled };
-  });
-  check(!back.eDis && !back.tDis, '切回「事件」后结束日期/时刻恢复可填');
+  check(backPt.out.indexOf('时间点') >= 0,
+    'v35：清空结束日期 → 自动回退为「时间点」（实际「' + backPt.out + '」）');
+  check(backPt.tDis, 'v35：判为时间点后结束时刻被禁用');
+  check(/时间点/.test(backPt.hint), 'v35：说明回退为「留空 = 时间点 ◆」（实际「' + backPt.hint + '」）');
   await page.click('.gv-close');
 
-  /* 编辑「已存在」的时间点（b7 交大人节文艺晚会，时刻由管理员维护，期望值从 gantt.md 推导）：结束侧应在打开表单时就已禁用+清空。
-     这条路径与新增表单不同 —— 初始 kind 直接就是 milestone，靠 renderForm 末尾的 syncKind() 兜住。 */
+  /* 编辑「已存在」的时间点（b7 交大人节文艺晚会，时刻由管理员维护，期望值从 gantt.md 推导）：
+     该条 end == start、无结束时刻 → 表单打开即应自动判定为「时间点」并禁用结束时刻。
+     这条路径与新增表单不同 —— 靠 renderForm 末尾的 syncKind() 兜住。 */
   await page.evaluate(() => {
     const row = Array.prototype.slice.call(document.querySelectorAll('.gv-lname'))
       .filter(x => x.textContent.indexOf('交大人节') >= 0)[0];
@@ -823,14 +861,14 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   await page.click('.gv-editbtn');
   await page.waitForSelector('#gv-crudform', { timeout: 5000 });
   const eb = await page.evaluate(() => {
-    const k = document.querySelector('[name=kind]'), s = document.querySelector('[name=startTime]');
+    const o = document.querySelector('#gv-kindout'), s = document.querySelector('[name=startTime]');
     const e = document.querySelector('[name=end]'), t = document.querySelector('[name=endTime]');
-    return { kind: k.value, sv: s.value, eDis: e.disabled, tDis: t.disabled, ev: e.value, tv: t.value };
+    return { out: o ? o.value : '', sv: s.value, ev: e ? e.value : '', tDis: t.disabled, tv: t.value };
   });
-  check(eb.kind === 'milestone', '编辑既有时间点：类型回显为「时间点」（实际 ' + eb.kind + '）');
+  check(eb.out.indexOf('时间点') >= 0,
+    '编辑既有时间点：自动判定回显「时间点」（实际「' + eb.out + '」）');
   check(eb.sv === b7t.startTime, '编辑既有时间点：开始时刻回显 ' + b7t.startTime + '（实际「' + eb.sv + '」）');
-  check(eb.eDis && eb.tDis && eb.ev === '' && eb.tv === '',
-    '编辑既有时间点：结束日期/时刻打开即禁用并清空（值「' + eb.ev + '」「' + eb.tv + '」）');
+  check(eb.tDis, '编辑既有时间点：结束时刻打开即禁用');
   await page.click('.gv-close');
 
   /* 「关键节点」已不是类型，但既有 crit 条目（t8 期末考试周）在编辑时应给出可取消的保留开关 */
@@ -843,11 +881,12 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   await page.click('.gv-editbtn');
   await page.waitForSelector('#gv-crudform', { timeout: 5000 });
   const ck = await page.evaluate(() => {
-    const k = document.querySelector('[name=kind]'), c = document.querySelector('[name=keepCrit]');
-    return { kind: k ? k.value : '', hasCk: !!c, checked: !!(c && c.checked), opts: Array.prototype.slice.call(k.options).map(o => o.value).join(',') };
+    const o = document.querySelector('#gv-kindout'), c = document.querySelector('[name=keepCrit]');
+    const sel = document.querySelector('#gv-crudform [name=kind]');
+    return { out: o ? o.value : '', hasSel: !!sel, hasCk: !!c, checked: !!(c && c.checked) };
   });
-  check(ck.kind === 'normal' && ck.opts === 'normal,milestone',
-    '编辑既有 crit 条目：类型回显「事件」，下拉只有 normal/milestone（' + ck.opts + '）');
+  check(!ck.hasSel && ck.out.indexOf('事件') >= 0,
+    '编辑既有 crit 条目（两端异日的普通事件）：自动判定为「事件」（' + ck.out + '）');
   check(ck.hasCk && ck.checked, '既有 crit 条目给出「保留关键节点紫圈标记」复选框，默认勾选');
   await page.click('.gv-close');
   await page.evaluate(() => localStorage.removeItem('gantt_admin_token'));
