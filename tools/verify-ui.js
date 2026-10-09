@@ -911,7 +911,7 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     }));
     /* ② GitHub API 替身：GET 给完整文件（远端有 b7），PUT 记录下来并假装成功 */
     const puts = [];
-    await p2.route('**/*api.github.com/**', route => {
+    await p2.route('**/api/gh/**', route => {
       const req = route.request(), url = req.url();
       if (req.method() === 'PUT') {
         puts.push({ url: url, body: JSON.parse(req.postData() || '{}') });
@@ -1016,7 +1016,7 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     }));
     /* ② GitHub API 替身：GET 给远端（含占位条目），PUT 记录下来并假装成功 */
     const puts3 = [];
-    await p3.route('**/*api.github.com/**', route => {
+    await p3.route('**/api/gh/**', route => {
       const req = route.request(), url = req.url();
       if (req.method() === 'PUT') {
         puts3.push({ url: url, body: JSON.parse(req.postData() || '{}') });

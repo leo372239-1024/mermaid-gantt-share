@@ -1,0 +1,76 @@
+# 读研甘特图 · 本地化部署（PostgreSQL + Node 服务）
+#
+#   docker compose up -d --build     启动 / 重建（首次会自动建表 + 导入种子数据）
+#   docker compose logs -f app       看服务日志
+#   docker compose ps                看运行状态
+#   docker compose restart app       只重启 Web 服务（改了 server/ 下的代码后）
+#   docker compose down              停止（数据保留在 named volume 里）
+#   docker compose down -v           停止并清空数据库（慎用！会丢掉所有改动）
+#
+# 端口（刻意选在 15001–49151 这一段）：
+#   本机 `netsh int ipv4 show dynamicport tcp` 显示 TCP 动态端口池是 1024–15000，
+#   所以只要端口落在 15000 以上、49151 以下，就既不会撞上系统临时端口，
+#   也不会落进 Windows 默认的 49152+ 动态区间。
+#     18080  Web 服务（绑 0.0.0.0，局域网内的手机/平板可访问）
+#     15432  PostgreSQL（绑 127.0.0.1，只有本机能连，不对外暴露）
+
+name: mermaid-gantt-share
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gantt-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gantt
+      POSTGRES_USER: gantt
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 未设置 —— 请确认项目根目录下的 .env 文件存在}
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${DB_PORT:-15432}:5432"
+    volumes:
+      - gantt-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gantt -d gantt"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build:
+      context: ./server
+    image: gantt-local-app:latest
+    container_name: gantt-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 18080
+      SITE_DIR: /site
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: gantt
+      PGUSER: gantt
+      PGPASSWORD: ${DB_PASSWORD:?}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD 未设置 —— 请确认项目根目录下的 .env 文件存在}
+      TZ: Asia/Shanghai
+    ports:
+      - "${APP_PORT:-18080}:18080"
+    volumes:
+      # 整个项目「只读」挂载：
+      #   1) 前端静态文件（index.html / js/* / fonts / vendor）改完刷新浏览器即可生效，无需重建镜像；
+      #   2) 首次启动时充当种子数据来源（gantt.md / js/events.js / samples / files）。
+      # 运行期的所有写入都落在 PostgreSQL 里，不回写磁盘 —— 数据库是唯一数据源。
+      - ./:/site:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  gantt-pgdata:
+    name: gantt-pgdata

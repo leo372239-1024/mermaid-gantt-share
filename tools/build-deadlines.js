@@ -148,8 +148,16 @@ function dueTextLong(daysLeft, time, y, m, d) {
 
 /* ---------- 主流程 ---------- */
 
-function build() {
-  const model = Parser.parse(readGanttCode());
+/*
+ * opts 可注入数据源（本地服务 server/deadlines.js 用）：
+ *   opts.ganttCode —— mermaid 代码文本；不传则读磁盘上的 gantt.md
+ *   opts.events    —— 班务详情对象；不传则用 require 进来的 js/events.js
+ * 线上（GitHub Actions）与 CLI 不带参数调用，行为与改造前完全一致。
+ */
+function build(opts) {
+  opts = opts || {};
+  const model = Parser.parse(opts.ganttCode != null ? opts.ganttCode : readGanttCode());
+  const events = opts.events || Events;
   const now = nowCST();
   const nowMs = Date.now();
   const todayNo = cstDayNo(now.y, now.m, now.d);
@@ -158,9 +166,15 @@ function build() {
     return /缺少有效日期|未能从代码中解析/.test(w);
   });
   if (fatal.length) {
-    console.error('[build-deadlines] gantt.md 存在致命解析问题，已中止：');
+    const msg = '[build-deadlines] gantt.md 存在致命解析问题，已中止';
+    console.error(msg + '：');
     fatal.forEach(function (w) { console.error('  - ' + w); });
-    process.exit(1);
+    /* 这里绝不能 process.exit —— 本地服务在响应 /deadlines.json 时会调用本函数，
+       退出进程等于把整个网站搞挂（一个语法错误就能让服务下线）。
+       改为抛异常，由调用方决定是回 500 还是沿用上一次的结果。 */
+    const err = new Error(msg + '：' + fatal.join(' / '));
+    err.code = 'GANTT_PARSE_FATAL';
+    throw err;
   }
 
   /* 任务 id → 所属 section 名 */
@@ -201,7 +215,7 @@ function build() {
     const alarmD = new Date(alarmMs + CST_OFFSET);
     const alarmTime = pad2(alarmD.getUTCHours()) + ':' + pad2(alarmD.getUTCMinutes());
 
-    const ev = Events[t.id];
+    const ev = events[t.id];
     const displayName = (ev && ev.short) ? ev.short : t.name;
     const whereText = (ev && ev.where) ? String(ev.where).trim() : '';
     const hoursLeft = Math.round((dueMs - nowMs) / 3600000);
@@ -357,6 +371,10 @@ function build() {
   return { out: out, ics: ics, icsCount: icsEvents.length };
 }
 
+/* ---------- CLI 入口 ----------
+   只有直接 `node tools/build-deadlines.js` 时才写文件、打日志。
+   被本地服务 require 时（server/deadlines.js）只导出 build()，不产生任何副作用。 */
+function cli() {
 const built = build();
 const result = built.out;
 const outPath = path.join(ROOT, 'deadlines.json');
@@ -385,3 +403,8 @@ result.items.forEach(function (it) {
   console.log('   · [' + it.window + '] ' + it.alert + (it.overdue ? '  ⚠ 未标记 done' : ''));
 });
 if (result.count === 0) console.log('   （窗口内没有待办）');
+}
+
+module.exports = { build: build };
+
+if (require.main === module) cli();

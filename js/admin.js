@@ -1,14 +1,19 @@
 /*
- * admin.js —— 管理员 CRUD 支持（GitHub API 线上直写，双端 IIFE）
+ * admin.js —— 管理员 CRUD 支持（本地服务直写，双端 IIFE）
  *
  * 职责：把甘特图的时间线（gantt.md 的 mermaid 块）与班务详情（js/events.js）
- *       从渲染模型「序列化回源文件」，并通过 GitHub Contents API 写回仓库，
- *       实现「点开详情弹窗 → 增删改查 → 保存 → 全班刷新即见」。
+ *       从渲染模型「序列化回源文件」，并通过本地服务写进 PostgreSQL，
+ *       实现「点开详情弹窗 → 增删改查 → 保存 → 刷新即见」（无 CI、无 CDN 等待）。
  *
  * 安全模型：
- *   - 令牌（PAT）由管理员本人在浏览器输入，仅存于其本地 localStorage，绝不写入代码/仓库。
+ *   - 管理员口令由服务端校验，换回的令牌仅存于浏览器 localStorage，不写入代码/仓库。
  *   - 未登录（无令牌）时，渲染端只读，不显示任何编辑入口。
- *   - 所有写操作走官方 REST API（api.github.com 支持 CORS）。
+ *   - 读写都走本地服务：读免登录，写必须带 Authorization: Bearer <token>。
+ *
+ * 存储层接口形状刻意与 GitHub Contents API 保持一致
+ * （/api/gh/repos/:owner/:repo/contents/:path，返回 { content(base64), sha }），
+ * 所以本文件除了下面三个常量之外无需感知后端差异 ——
+ * 从 GitHub Pages 切到本地服务，只改了 API_BASE / rawUrl / validateToken 三处。
  *
  * 用法：GanttAdmin.serializeGantt(model) / serializeEvents(events) / getFile / putFile
  */
@@ -21,9 +26,12 @@
   var G = (typeof globalThis !== 'undefined') ? globalThis
     : (typeof self !== 'undefined' ? self : this);
 
-  /* 目标仓库（与本项目 remote 一致） */
+  /* 目标仓库标识：本地服务的兼容层仍按 :owner/:repo/contents/:path 的形状解析路径，
+     保留这两个值是为了让 URL 形状与 GitHub Contents API 完全一致（前端逻辑零改动）。 */
   var REPO = { owner: 'leo372239-1024', repo: 'mermaid-gantt-share', branch: 'main' };
-  var API_BASE = 'https://api.github.com/repos/' + REPO.owner + '/' + REPO.repo + '/contents/';
+  /* 本地服务（server/index.js）暴露的兼容端点。
+     原来是 'https://api.github.com/repos/' + ...，本地化只改了这一个常量。 */
+  var API_BASE = '/api/gh/repos/' + REPO.owner + '/' + REPO.repo + '/contents/';
   var TOKEN_KEY = 'gantt_admin_token';
 
   /* v33：表单取消「阶段」字段后，新增条目统一归入这个 section。
@@ -525,10 +533,10 @@
     });
   }
 
-  /* 资源直链：raw.githubusercontent 前缀拼装（path 需 encodeURIComponent 兼容中文文件名） */
+  /* 资源直链：本地服务的 /raw/ 前缀（path 需 encodeURIComponent 兼容中文文件名）。
+     原来是 raw.githubusercontent.com 前缀，本地化只改了这里。 */
   function rawUrl(p) {
-    return 'https://raw.githubusercontent.com/' + REPO.owner + '/' + REPO.repo + '/' + REPO.branch + '/' +
-      p.split('/').map(encodeURIComponent).join('/');
+    return '/raw/' + String(p).split('/').map(encodeURIComponent).join('/');
   }
   /* 通用资源上传：base64 原样写回仓库指定路径（UTF-8 转码会破坏二进制），返回 raw 直链 */
   function putAsset(p, b64, message) {
@@ -580,15 +588,26 @@
     return putAsset(pth, p.b64, message || ('file: ' + pth));
   }
 
-  /* 验证令牌是否有效（读一个已知文件，contents:read 即可） */
-  function validateToken(token) {
-    var h = { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + token };
-    return fetch(API_BASE + 'gantt.md?ref=' + REPO.branch, { headers: h, cache: 'no-store' })
-      .then(function (res) {
-        if (res.status === 401 || res.status === 403) throw new Error('令牌无效或无权限');
-        if (!res.ok) throw new Error('验证请求失败：HTTP ' + res.status);
-        return true;
-      });
+  /* 用管理员口令换取访问令牌（本地服务 POST /api/login）。
+     返回值是服务端签发的 token（不是用户输入的口令本身），
+     调用方需要把它存起来，后续写操作以 Bearer 形式带上。 */
+  function validateToken(password) {
+    return fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: password })
+    }).then(function (res) {
+      if (res.status === 401) throw new Error('口令不正确');
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (j) {
+          throw new Error((j && j.message) || ('登录失败：HTTP ' + res.status));
+        });
+      }
+      return res.json();
+    }).then(function (j) {
+      if (!j || !j.token) throw new Error('服务端未返回令牌');
+      return j.token;
+    });
   }
 
   return {

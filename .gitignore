@@ -1,0 +1,13 @@
+# ---- 本地化部署 ----
+# 含数据库口令与管理员口令，绝不提交
+.env
+
+# 服务端依赖在容器内安装，不进仓库
+server/node_modules/
+
+# ---- 系统 / 编辑器杂项 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp

@@ -714,12 +714,11 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
     /* 全部任务 */
     var tasksAll = model.all;
 
-    /* ---- 课程事件隐藏/显示（v32，v35 起默认隐藏）：课程日事件 id 形如 k1w09（k=课程号,w=教学周），
-           名字/详情里以「课程表」小节承载。点击工具栏「📚 显示课程」一键切换。
-           showCourse=false 时：不渲染课程时间条、左列索引、轨道计算，只保留课程详情可达的普通事件。
-           默认 false（隐藏）——114 条课程日事件会淹没班务大事，先给一个干净的班务视图，
-           需要看课时再点按钮展开。 */
-    var showCourse = false;
+    /* ---- 课程事件隐藏/显示（v32，v35 默认隐藏；v39 起改为默认显示）：课程日事件 id 形如 k1w09（课程号,教学周），
+           名字/详情里以「课程表」小节承载。点击工具栏「📚 隐藏课程」隐藏/「📚 显示课程」显示。
+           showCourse=true 时：渲染课程时间条、左列索引、轨道计算。
+           默认 true（显示）——打开即看完整课程安排，需要聚焦班务时再点按钮收起。 */
+    var showCourse = true;
     function isCourseTask(t) { return /^k\d+w\d+$/.test((t && t.id) || ''); }
     function visibleTasks() { return showCourse ? tasksAll : tasksAll.filter(function (t) { return !isCourseTask(t); }); }
 
@@ -758,7 +757,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       '  <button class="gv-tbtn" data-act="nextYear" title="下一学年">下年 ››</button>' +
       '  <span style="width:2px;height:16px;background:var(--gv-line);display:inline-block"></span>' +
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
-      '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认隐藏，只看班务大事）">📚 显示课程</button>' +
+      '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认显示，完整课程表）">📚 隐藏课程</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
       '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
       '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看「今天截止」的待办提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +

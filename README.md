@@ -1,12 +1,140 @@
 # 📊 班级甘特图共享站（Mermaid Gantt）
 
-在电脑上改一份 `gantt.md` → git push → 全班在手机上打开同一个链接，看到最新甘特图。**图中红色竖线 = 今日，位置随"打开当天"自动更新，不需要任何定时任务。**
+在本机跑一套 Docker 服务（PostgreSQL + Node），改完**立即写入数据库、刷新即见**；局域网内的同学用手机打开 `http://<本机IP>:18080` 就能看。**图中红色竖线 = 今日，位置随"打开当天"自动更新，不需要任何定时任务。**
 
-## 🔗 线上地址（发班级群用）
+## 🔗 访问地址
 
-- **主用链接（GitHub Pages，公开免 token）**：https://leo372239-1024.github.io/mermaid-gantt-share/
+- **本机**：http://localhost:18080
+- **局域网（手机 / 平板，需连同一 Wi-Fi）**：http://192.168.0.3:18080 ← 本机 WLAN 地址，换网络后可能变化，用 `tools\local-status.cmd` 查当前值
+- **旧线上站（已停用，仅作历史存档）**：https://leo372239-1024.github.io/mermaid-gantt-share/
 - 班级群二维码：`docs/gantt-qr.png`
-- ⚠️ EdgeOne Pages 说明：其默认域名受平台合规策略限制（含中国大陆区域的默认域名只能走 3 小时过期的预览链接，对匿名访问返回 401），故主用 GitHub Pages；若后续绑定自有域名，可切回 EdgeOne 做国内加速。
+
+> 2026-10-09 起，本项目从「GitHub Pages + Contents API 直写」切换为「**本机 Docker 服务 + PostgreSQL**」。
+> 原因：线上每次保存要等 GitHub API 写入 → Actions 重建 deadlines → Pages 重新部署，全链路几十秒到几分钟。
+> 现在保存只写本机数据库，**毫秒级生效**。详见下一节。
+
+## ⚡ 本地化部署（Docker + PostgreSQL）
+
+### 架构
+
+```
+浏览器（本机 / 局域网手机）
+   │  HTTP :18080
+   ▼
+Node 服务（容器 gantt-app）
+   ├─ 静态托管前端          index.html / js/* / fonts / vendor
+   ├─ GitHub Contents API 兼容层   /api/gh/repos/:owner/:repo/contents/:path
+   ├─ 资源直链              /raw/*
+   ├─ deadlines 运行期现算   /deadlines.json、/deadlines.ics
+   └─ 口令认证              POST /api/login
+   │  TCP :5432（容器网络内）
+   ▼
+PostgreSQL 16（容器 gantt-db）
+   ├─ files         gantt.md、js/events.js（路径即主键）
+   ├─ assets        samples/*、files/* 二进制
+   └─ revisions     每次写入的版本快照（可回滚）
+```
+
+**关键设计**：服务端把 GitHub Contents API 的 **URL 形状与响应字段原样复刻**，所以 `js/admin.js` 只改了三个常量（`API_BASE` / `rawUrl` / `validateToken`），业务逻辑一行未动 —— 迁移风险被压到最低。
+
+### 快速上手
+
+```bash
+cd G:\IT_develop\github_projects\mermaid-gantt-share
+
+docker compose up -d --build     # 启动（首次自动建表 + 把磁盘上的 gantt.md / events.js / samples 导入数据库）
+docker compose logs -f app       # 看日志
+docker compose ps                # 看状态
+```
+
+也可直接双击 `tools\local-status.cmd` 看状态。
+
+打开 **http://localhost:18080** 即可。管理员口令见 `.env` 里的 `ADMIN_PASSWORD`。
+
+### 端口（为什么是这两个）
+
+本机 TCP 动态端口池是 **1024–15000**（`netsh int ipv4 show dynamicport tcp` 可查），
+所以端口刻意选在 **15001–49151** 之间 —— 既避开系统临时端口，也不会落进 Windows 默认的 49152+ 区间。
+
+| 端口 | 用途 | 暴露范围 |
+|---|---|---|
+| 18080 | Web 服务 | `0.0.0.0`，局域网可访问 |
+| 15432 | PostgreSQL | `127.0.0.1`，仅本机可连 |
+
+改端口：编辑 `.env` 里的 `APP_PORT` / `DB_PORT`，然后 `docker compose up -d`。
+
+### 开机自启动
+
+三层保障：
+
+1. **容器 `restart: unless-stopped`** —— Docker 引擎一启动，容器自动拉起；
+2. **Docker Desktop 的「登录时启动」**（本机已开启，`settings-store.json` 里 `AutoStart: true`）；
+3. **启动文件夹兜底**：`%APPDATA%\...\Startup\MermaidGanttAutoStart.vbs` —— 登录后静默执行 `tools\local-up.cmd`（先等 Docker 引擎就绪，再 `docker compose up -d`），覆盖「Docker 启动慢」或「曾被 `docker compose down` 停过」的情况。
+
+换机 / 重装时执行 `tools\install-autostart.cmd` 重新安装自启项，`tools\uninstall-autostart.cmd` 移除。
+
+### 局域网访问
+
+服务已监听 `0.0.0.0:18080`，但 **Windows 防火墙默认会拦截入站**。以管理员身份运行一次：
+
+```
+tools\allow-firewall.cmd
+```
+
+之后手机连同一 Wi-Fi，打开 `http://<本机IP>:18080`（当前 WLAN 地址为 `192.168.0.3`）。
+**看的人不需要口令**；只有点「保存」写数据时才需要管理员口令。
+
+### 常用运维
+
+| 想做什么 | 命令 |
+|---|---|
+| 启动 / 重建 | `docker compose up -d --build` |
+| 停止（数据保留） | `docker compose down` |
+| 停止并**清空数据** | `docker compose down -v` ⚠️ 不可逆 |
+| 重启 Web 服务（改过 `server/` 代码后） | `docker compose restart app` |
+| 看日志 | `docker compose logs -f app` |
+| 进数据库 | `docker exec -it gantt-db psql -U gantt -d gantt` |
+| 看某文件的改动历史 | `curl "http://localhost:18080/api/revisions?path=gantt.md&limit=20"` |
+
+### 改前端 vs 改后端
+
+- **改前端**（`index.html`、`js/*`、`fonts/`）：项目目录以**只读卷**挂载进容器，改完**刷新浏览器**即可，不用重启。
+- **改后端**（`server/*`）：需要 `docker compose up -d --build` 重建镜像。
+
+### 数据在哪 / 怎么备份
+
+数据全在 Docker named volume **`gantt-pgdata`** 里，容器删了也不丢。
+
+```bash
+# 备份
+docker exec gantt-db pg_dump -U gantt -d gantt > backup-20261009.sql
+
+# 恢复
+docker exec -i gantt-db psql -U gantt -d gantt < backup-20261009.sql
+```
+
+### 与 GitHub 的关系
+
+**已彻底解耦**。运行期不再读写 GitHub：
+
+- 读：`/gantt.md`、`/js/events.js` 由服务从数据库返回（磁盘上的同名文件只在首次启动时当种子）；
+- 写：全部落 PostgreSQL；
+- `deadlines.json` / `deadlines.ics` 改为请求时现算，**不再依赖 GitHub Actions**。
+
+`.github/workflows/update-deadlines.yml` 与仓库里那两个生成物保留着，但不再影响本地服务。
+
+> ⚠️ 由此带来一个行为变化：**直接编辑磁盘上的 `gantt.md` 不会影响页面**（数据库才是唯一数据源）。
+> 请通过网页端管理员登录来改，或直接 `psql` 改库。
+
+### 故障排查
+
+| 现象 | 处理 |
+|---|---|
+| 页面显示「内置示例」告警 | 服务没起来。`docker compose ps` 看状态，`docker compose logs app` 看日志 |
+| 保存时报「未登录或登录已过期」 | 令牌有效期 12 小时，重新点「🔒 管理员」输入口令即可 |
+| 保存时报「远端内容已更新（sha 不匹配）」 | 这是并发保护生效：数据在你编辑期间被改过，重新打开详情再存一次即可 |
+| 手机打不开 | ① 是否同一 Wi-Fi；② 是否跑过 `tools\allow-firewall.cmd`；③ IP 是否变了（`tools\local-status.cmd`） |
+| 改了 `.env` 不生效 | 需要 `docker compose up -d` 让容器重建 |
 
 ## 一、这套东西怎么工作（30 秒理解）
 
@@ -29,19 +157,54 @@
 | `docs/ios-reminder-setup.md` | iPhone 强提醒配置指南（快捷指令 + 定时自动化，零服务器） |
 | `docs/ios-system-alarm-setup.md` | iPhone **系统级闹钟/日历**配置指南（日历订阅、.ics 导入、时钟 App 真闹钟） |
 
+### 本地化新增的文件
+
+| 文件 | 作用 |
+|---|---|
+| `docker-compose.yml` | 编排 `gantt-db`（PostgreSQL 16）+ `gantt-app`（Node 服务），均 `restart: unless-stopped` |
+| `server/index.js` | 本地服务主入口：静态托管 + Contents API 兼容层 + `/raw` 资源 + deadlines 现算 + 口令认证 |
+| `server/db.js` + `server/schema.sql` | PostgreSQL 存储层（`files` / `assets` / `revisions` 三张表）与首次种子导入 |
+| `server/gh-api.js` | GitHub Contents API 的本地兼容层（URL 形状与响应字段保持一致） |
+| `server/auth.js` | 管理员口令校验 + 无状态令牌签发（HMAC-SHA256，12 小时有效） |
+| `server/deadlines.js` | 运行期生成 `deadlines.json` / `.ics`，复用 `tools/build-deadlines.js` 的口径 |
+| `.env` | 本地配置：端口 + 口令（**已 gitignore；含口令，勿外传、勿提交**） |
+| `tools/local-up.cmd` / `local-down.cmd` / `local-status.cmd` | 一键启动 / 停止 / 查状态 |
+| `tools/install-autostart.cmd` / `uninstall-autostart.cmd` | 安装 / 移除开机自启（VBS 放进启动文件夹，登录时静默拉起） |
+| `tools/allow-firewall.cmd` | 放行入站 TCP 18080（需管理员运行），让局域网手机能访问 |
+| `tools/local-push.mjs` | 把本地文件整份写回数据库（批量改代码时用） |
+
 **为什么零外链（重要）**：本页此前用 `fonts.googleapis.com` 的样式表引入 Inter，而 `editor.html` 用的 mermaid 也已自托管。但那条字体外链有两个真实问题 —— ① `<link rel="stylesheet">` 是**渲染阻塞**的，取不到就一直白屏；② **中国大陆访问 Google Fonts 会被阻断**，而本页读者正是国内同学。现已把 Inter 的 **Latin 子集**（48KB 可变字体）下载进 `fonts/` 自托管：**整页零第三方请求、可离线打开**，首屏不再被第三方网络拖住。中文正文照旧走系统字体栈（PingFang SC / Microsoft YaHei），不需要也不应该打包 CJK 字库。
 
 **今日线原理**：渲染时按浏览器当前日期绘制两条红色竖线 —— 实线为**当前时刻**（分钟级小数天偏移，页面上每分钟自动移动，标注「现在 HH:mm」置于线**左**侧），虚线为**今日 24:00**（当日右边界，标注置于线**右**侧）。全部本地计算，无服务器、无定时任务。
 
 **坐标口径（分钟级，全链路统一）**：事件条的位置与长度按 `开始日期+开始时刻` → `结束日期+结束时刻` 的**真实比例**落在时间轴上（3 小时的会议就是 1/8 天宽，最小 3px 保可点）。未填时刻时的默认语义：开始 → 当日 00:00；截止 → 当日 23:59（起止同日且只填了开始时刻 → 用开始时刻）。时间点/里程碑是零长度区间：填了时刻精确落在该分钟，未填则取**当日正中**（压在日界线上会分不清属于哪一天）。此口径与 ddl 提醒、`deadlines.json`、`deadlines.ics` 完全一致 —— 改一处必须同步改 `js/viewer.js` 的 `remStartHM/remDueHM` 与 `tools/build-deadlines.js` 的 `startHmOf/dueHmOf`。
 
-## 二、日常更新（3 步，以后每天都这样）
+## 二、日常更新（本地化后：改完即见）
 
-1. 改代码：用 VS Code（装 Mermaid Preview 插件）或直接双击 `editor.html` 本地预览校对；
-2. 把最终代码粘贴进 `gantt.md`（替换 ```mermaid 代码块内容），保存；
-3. 提交推送：`git add -A && git commit -m "更新甘特图" && git push` —— 等约 1 分钟，线上自动更新。
+**方式 A（推荐，网页端）**
 
-> 手机也能改：打开 GitHub 仓库网页版直接编辑 `gantt.md` → Commit changes，同样会自动发布。
+1. 打开 http://localhost:18080 → 点右上角「🔒 管理员」输入口令；
+2. 点任意 **任务条 / 节点 / 标题 / 左侧名称** 打开详情弹窗；
+3. 新增 / 编辑 / 删除 → 弹窗里点「保存」→ **刷新即见**（毫秒级，无需等待）。
+
+**方式 B（批量改代码）**
+
+一次要改很多条时，先在本地把 `gantt.md` / `js/events.js` 改好，再整份写回数据库：
+
+```bash
+# 1) 从数据库导出当前内容
+curl -s http://localhost:18080/gantt.md > gantt.md
+curl -s http://localhost:18080/js/events.js > js/events.js
+
+# 2) 用 VS Code / editor.html 本地编辑 ...
+
+# 3) 写回（口令自动从 .env 读取；会记录一条版本历史）
+node tools/local-push.mjs gantt.md --message "批量更新"
+node tools/local-push.mjs js/events.js --message "同步班务详情"
+```
+
+> ⚠️ 本地化后**不再需要 `git push` 来发布**。Git 只用于代码版本管理，页面数据来自 PostgreSQL。
+> 直接编辑磁盘上的 `gantt.md` 不会影响页面 —— 数据库才是唯一数据源。
 
 ### 渲染页交互（v2 起，面向同学）
 

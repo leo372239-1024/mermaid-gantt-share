@@ -1,0 +1,13 @@
+{
+  "name": "mermaid-gantt-share-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "读研甘特图的本地服务：静态托管 + GitHub Contents API 兼容层 + PostgreSQL 存储",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
