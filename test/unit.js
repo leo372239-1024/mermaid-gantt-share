@@ -327,7 +327,15 @@ if (nearButNotToday.length) {
 console.log('[9b] 课程表与提醒链路');
 const courseIds = model.sections.filter(s => /课程表/.test(s.name))
   .reduce((a, s) => a.concat(s.tasks.map(t => t.id)), []);
-check(courseIds.length === 114, '甘特图含「课程表」section 且按教学周展开为 114 条上课日事件（' + courseIds.length + ' 条）');
+/* 条数不写死：课表会随「已上过的课」被裁掉（2026-10-09 线上移除了 k12w03 那一天），
+   写死 114 就变成「数据一变动就假红」—— 契约是「展开完整且与源文件一致」，不是「恰好 114 条」。
+   期望值改为从 gantt.md 原文逐行取（复用 Admin.taskIdOfLine，与解析器同口径）。 */
+const courseIdInSrc = readGanttMd().split('\n')
+  .map(l => Admin.taskIdOfLine(l)).filter(id => /^k\d+w\d+$/.test(id));
+check(courseIds.length === courseIdInSrc.length && courseIds.length >= 100,
+  '甘特图含「课程表」section，按教学周展开的条数与源文件 k* 行数一致（' + courseIds.length + ' 条，源文件 ' + courseIdInSrc.length + ' 行）');
+check(new Set(courseIds).size === courseIds.length,
+  '课程日事件 id 全局唯一（' + courseIds.length + ' 条 → ' + new Set(courseIds).size + ' 个 id）');
 /* 每五天展开：每条 id 形如 k{基础}w{周}，基础课程 k1..k12；同一周周X 条目起止精确到分钟且同日 */
 const baseCourse = courseIds.map(id => /^(k\d+)w\d+$/.exec(id)[1]);
 check(new Set(baseCourse).size === 12 && /^k\d$/.exec(baseCourse[0]), '展开后仍归一到基础课程 k1..k12（出现 ' + new Set(baseCourse).size + ' 门课）');
@@ -836,7 +844,7 @@ const realGanttMermaid = (function () {
 const realIds = Object.keys(Admin.taskIdsIn(realGanttMermaid)).sort();
 const modelIds = model.all.map(t => t.id).filter(Boolean).sort();
 check(realIds.join(',') === modelIds.join(','),
-  '15f.1 ★ taskIdOfLine 取出的 id 集合与解析器**完全相等**（' + realIds.length + ' 条，含 114 条名称带时刻的课程行）');
+  '15f.1 ★ taskIdOfLine 取出的 id 集合与解析器**完全相等**（' + realIds.length + ' 条，含名称带时刻的课程行）');
 /* 本页只有前一半任务（模拟过期页面）→ 合并后另一半必须全部回来 */
 const half = model.all.slice(0, Math.floor(model.all.length / 2));
 const halfCode = 'gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %Y-%m\n    section 新增事项\n' +
