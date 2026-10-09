@@ -555,13 +555,13 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
   check(icsOk, 'Blob / createObjectURL 可用（.ics 下载通道可用）');
   await page.click('.gv-rem-close');
 
-  console.log('[5] Ctrl+S → 保存同步');
+  console.log('[5] Ctrl+S → 重试未写入的改动');
   await page.keyboard.down('Control');
   await page.keyboard.press('KeyS');
   await page.keyboard.up('Control');
   await page.waitForTimeout(300);
   const toastTxt = await page.$eval('.gv-toast', e => e.textContent).catch(() => '');
-  check(toastTxt.indexOf('Ctrl+S') >= 0, '未登录时给出明确提示（实际「' + toastTxt + '」）');
+  check(toastTxt.indexOf('未登录') >= 0, '未登录时给出明确提示（实际「' + toastTxt + '」）');
 
   console.log('[6] 逐日交替底色 + 日期数字居中');
   /* 用条纹几何反推 pxPerDay / LEFT_PAD。
@@ -967,12 +967,12 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     check(/^ {4}b1: \{/m.test(written) && /^ {4}b6: \{/m.test(written), '其余条目照常写出（合并没有破坏正常内容）');
     const gPut = puts.filter(x => /gantt\.md/.test(decodeURIComponent(x.url)))[0];
     check(!!gPut, 'gantt.md 同样被写回（两条写操作都在）');
-    /* v33：保留远端条目的提示改由「提交即同步」的 saveAll().then 发出 */
+    /* v41：并入保留服务端条目的提示由「保存即写库」的 saveAll().then 发出 */
     const toastTxt = await p2.evaluate(() => {
       const t = document.querySelector('.gv-toast');
       return t ? t.textContent : '';
     });
-    check(/保留远端新增的执行说明 ?b7/.test(toastTxt), '页面明确告知「保留远端新增的执行说明 b7」（实际「' + toastTxt + '」）');
+    check(/并入并保留了执行说明 ?b7/.test(toastTxt), '页面明确告知「并入并保留了执行说明 b7」（实际「' + toastTxt + '」）');
     await p2.close();
   }
 
@@ -1059,9 +1059,122 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
       '写回内容里 ' + clashId + ' 只出现一次（不会出现两条同 id）');
     check(dialogs3.length === 0, '全程没有弹任何确认框（旧版这里会弹「点确定就把远端条目删掉」）');
     const toast3 = await p3.evaluate(() => { const t = document.querySelector('.gv-toast'); return t ? t.textContent : ''; });
-    check(toast3.indexOf(clashId + ' → ' + newId) >= 0 && toast3.indexOf('保留远端多出的任务 ' + clashId) >= 0,
-      '页面明确告知「换号 + 保留了远端那条」（实际「' + toast3 + '」）');
+    check(toast3.indexOf(clashId + ' → ' + newId) >= 0 && toast3.indexOf('并入并保留了 ' + clashId) >= 0,
+      '页面明确告知「换号 + 并入了服务端那条」（实际「' + toast3 + '」）');
     await p3.close();
+  }
+
+  /* ------------------------------------------------------------------
+     [11c] v41「保存即写库」—— **走真实后端**（不拦截 API）
+     验证本次需求：弹窗点「保存」→ 数据立刻进数据库，且不再有任何常驻的手动同步入口。
+     口令来源：环境变量 ADMIN_PASSWORD → 项目根 .env；两处都取不到则跳过本节。
+     ⚠️ 本节会真实写入本机数据库；结束时把 gantt.md 还原为自检前的原文。
+     ------------------------------------------------------------------ */
+  console.log('[11c] v41 保存即写库（真实后端：点保存 → 立刻进库，无需手动同步）');
+  {
+    let pwd = process.env.ADMIN_PASSWORD || '';
+    if (!pwd) {
+      try {
+        const m = /^ADMIN_PASSWORD=(.+)$/m.exec(fs.readFileSync(path.join(ROOT_, '.env'), 'utf8'));
+        if (m) pwd = m[1].trim();
+      } catch (e) { /* 没有 .env 就跳过本节 */ }
+    }
+    if (!pwd) {
+      console.log('  ⏭ 跳过：未提供 ADMIN_PASSWORD（环境变量或项目根 .env），无法做真实写入验证');
+    } else {
+      const SAMPLE = 'E2E 保存即写库自检';
+      const API = new URL('api/gh/repos/leo372239-1024/mermaid-gantt-share/contents/', URL_).href;
+      const authH = tk => ({ 'Authorization': 'Bearer ' + tk, 'Accept': 'application/vnd.github+json' });
+      async function apiGet(p, tk) {
+        const r = await fetch(API + p, { headers: authH(tk), cache: 'no-store' });
+        if (!r.ok) throw new Error('读取 ' + p + ' 失败：HTTP ' + r.status);
+        const j = await r.json();
+        return { text: Buffer.from(j.content || '', 'base64').toString('utf8'), sha: j.sha };
+      }
+      async function apiPut(p, text, sha, msg, tk) {
+        const r = await fetch(API + p, {
+          method: 'PUT',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, authH(tk)),
+          body: JSON.stringify({
+            message: msg,
+            content: Buffer.from(text, 'utf8').toString('base64'),
+            sha: sha, branch: 'main'
+          })
+        });
+        return r.ok;
+      }
+
+      /* 1) 用真实口令换令牌（不是 mock） */
+      const lr = await fetch(new URL('api/login', URL_).href, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd })
+      });
+      const tk = lr.ok ? (await lr.json()).token : '';
+      check(lr.status === 200 && !!tk, '真实口令登录成功并拿到令牌（HTTP ' + lr.status + '）');
+
+      const before = await apiGet('gantt.md', tk);
+      const p4 = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage();
+      try {
+        await p4.addInitScript(t => { try { localStorage.setItem('gantt_admin_token', t); } catch (e) {} }, tk);
+        await p4.goto(URL_, { waitUntil: 'load' });
+        await p4.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
+        await p4.waitForTimeout(600);
+
+        /* 2) 弹窗新增一条时间点 → 点「✓ 保存」（全程不碰任何同步按钮） */
+        await p4.click('[data-act="add"]');
+        await p4.waitForSelector('#gv-crudform', { timeout: 5000 });
+        const btnLabel = await p4.$eval('#gv-crudsave', e => e.textContent.trim());
+        check(btnLabel.indexOf('保存') >= 0 && btnLabel.indexOf('暂存') < 0,
+          '弹窗按钮已是「' + btnLabel + '」，不再出现「暂存」字样');
+        await p4.fill('#gv-crudform [name=name]', SAMPLE);
+        await p4.fill('#gv-crudform [name=start]', '2026-11-20');
+        await p4.click('#gv-crudsave');
+        await p4.waitForTimeout(2500);
+
+        /* 3) 直接问后端：这条数据进库了吗？ */
+        const after = await apiGet('gantt.md', tk);
+        check(after.text.indexOf(SAMPLE) > 0,
+          '★ 后端 gantt.md 已含新条目 —— 点保存即已进库，无需任何手动同步');
+
+        /* 4) 本地队列必须为空（正常路径不留「待同步」滞留） */
+        const pend = await p4.evaluate(() => localStorage.getItem('gantt_pending'));
+        check(!pend, '本地队列已清空，没有「待同步」滞留');
+
+        /* 5) 工具栏不该有常驻的保存/同步按钮（重试入口仅异常时出现） */
+        const retryVis = await p4.evaluate(() => {
+          const b = document.querySelector('[data-act="save"]');
+          return !!b && getComputedStyle(b).display !== 'none';
+        });
+        check(!retryVis, '工具栏没有常驻的「保存更改」按钮（「⚠️ 重试同步」仅在写入失败时出现）');
+
+        /* 6) 走 UI 删除 → 验证「删除同样即写库」
+           注：左侧列表默认折叠（viewer.js 初始就 setLabelsCollapsed(true)），先点 ☰ 展开 */
+        await p4.click('#gv-ltoggle');
+        await p4.waitForTimeout(400);
+        const item = p4.locator('.gv-lname', { hasText: SAMPLE });
+        check(await item.count() === 1, '展开列表后，新建的条目已出现在左侧事件列表');
+        await item.first().click();
+        await p4.waitForSelector('.gv-delbtn', { timeout: 5000 });
+        await p4.click('.gv-delbtn');
+        await p4.waitForSelector('.gv-delconfirm', { timeout: 5000 });
+        await p4.click('.gv-delconfirm');
+        await p4.waitForTimeout(2500);
+        const after2 = await apiGet('gantt.md', tk);
+        check(after2.text.indexOf(SAMPLE) < 0, '★ 删除同样即写库：后端 gantt.md 已不含该条目');
+      } finally {
+        await p4.close().catch(() => {});
+        /* 兜底：无论走到哪一步，都把 gantt.md 还原为自检前的原文，保证零残留
+           （本机单人使用，期间不会有他人的改动被这次还原覆盖） */
+        try {
+          const cur = await apiGet('gantt.md', tk);
+          if (cur.text !== before.text) {
+            const ok = await apiPut('gantt.md', before.text, cur.sha, 'chore: 还原 E2E 自检前的 gantt.md', tk);
+            console.log(ok ? '  ↩ 已把 gantt.md 还原为自检前原文' : '  ⚠️ 还原失败，请手动检查 gantt.md');
+          }
+        } catch (e) { console.log('  ⚠️ 兜底还原出错：' + (e && e.message ? e.message : e)); }
+      }
+    }
   }
 
   console.log('[12] 截图存档');

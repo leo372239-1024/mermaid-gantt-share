@@ -759,7 +759,10 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       '  <button class="gv-tbtn primary" data-act="today" title="回到今天">📍 回到今天</button>' +
       '  <button class="gv-tbtn gv-coursebtn" data-act="toggleCourse" title="一键隐藏/显示所有课程事件（默认显示，完整课程表）">📚 隐藏课程</button>' +
       (isAdmin ? '  <button class="gv-tbtn gv-addbtn" data-act="add" title="新增事件/时间点" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">＋ 新增</button>' +
-      '  <button class="gv-tbtn gv-savebtn" data-act="save" title="保存更改">💾 保存更改</button>' : '') +
+      /* v41：不再有常驻的「保存更改」按钮 —— 弹窗点保存即写库。
+         这个按钮默认 display:none，只有**写入失败、改动滞留在本地队列**时才现身（见 syncSaveBtn），
+         作为兜底重试入口；正常使用完全看不到它。 */
+      '  <button class="gv-tbtn gv-savebtn" data-act="save" title="重试同步" style="display:none">⚠️ 重试同步</button>' : '') +
       '  <button class="gv-tbtn gv-rembtn" data-act="remind" title="查看「今天截止」的待办提醒" style="margin-left:auto">🔔 提醒<span class="gv-rem-badge" id="gv-rembadge"></span></button>' +
       '  <button class="gv-tbtn gv-fsbtn" data-act="fullscreen" title="浏览器内全屏显示甘特图">⛶ 全屏</button>' +
       '</div>' +
@@ -1740,20 +1743,19 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       return;
     }, { passive: false });
 
-    /* 键盘（桌面）：← / → 横向滚动；Ctrl / ⌘ + S = 保存同步（等价于工具栏「💾 保存更改」） */
+    /* 键盘（桌面）：← / → 横向滚动；Ctrl / ⌘ + S = 重试未写入的改动（v41：保存已实时，无滞留时只作提示） */
     document.addEventListener('keydown', function (e) {
       var tag = document.activeElement && document.activeElement.tagName;
       var inField = (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' ||
         !!(document.activeElement && document.activeElement.isContentEditable));
-      /* Ctrl/⌘ + S → 保存同步（浏览器默认行为是「保存网页」，必须先拦截） */
+      /* Ctrl/⌘ + S → 重试同步（浏览器默认行为是「保存网页」，必须先拦截） */
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === 's') {
         e.preventDefault();
-        if (!isAdmin) { toast('Ctrl+S = 保存同步：当前未登录管理员。点右上角「🔒 管理员」登录后即可使用。'); return; }
+        if (!isAdmin) { toast('当前未登录管理员。点右上角「🔒 管理员」登录后即可编辑（登录后点保存即写入数据库）。'); return; }
+        if (!hasPending()) { toast('✅ 所有改动都已写入数据库，无需同步。'); return; }
+        toast('⚠️ 有改动尚未写入数据库，正在重试…');
         var sbtn = toolbar.querySelector('[data-act="save"]');
-        if (!sbtn) { toast('未找到保存按钮，请刷新页面后重试。'); return; }
-        if (!hasPending()) { toast('✅ 当前没有未保存的改动（Ctrl+S = 保存同步）。'); return; }
-        toast('💾 正在保存同步到 GitHub…');
-        sbtn.click();
+        if (sbtn) sbtn.click();
         return;
       }
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
@@ -2317,7 +2319,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       else out[changeId] = changeEvent;
       return out;
     }
-    /* 保存/暂存后重渲染：不整页刷新（避免退出全屏）。用最新代码重新解析当前 mount 实例的数据变量，
+    /* 写库/保存后重渲染：不整页刷新（避免退出全屏）。用最新代码重新解析当前 mount 实例的数据变量，
        原地重建左列 + 重绘，全屏状态与滚动位置全部保留。 */
     function reloadAfterSave(code, evData) {
       if (!code) { var p = loadPending(); code = p ? p.ganttCode : ''; }
@@ -2355,8 +2357,12 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       form.insertBefore(d, form.querySelector('.f-actions'));
     }
 
-    /* ================= 本地待提交队列（localStorage + IndexedDB 双存） =================
-       所有增删改先写到这里（不立即请求 GitHub API），点「保存更改」后统一写回。
+    /* ================= 本地队列（localStorage + IndexedDB 双存） =================
+       v41 语义：**保存即写库** —— 这个队列已从「待提交暂存区」降级为「失败重试队列」。
+       点保存时先把改动同步写进这里（可靠），紧接着立刻调用 saveAll() 写后端；成功后
+       clearPending() 清空，队列恢复为空。只有写库**失败**时内容才会留下，由 30 秒定时器 /
+       页面重新可见 / 首载 1.5s 后自动重试，工具栏同时亮出「⚠️ 重试同步」。
+       （它仍是写库的数据来源：saveAll 读的就是这个队列。）
        注意：图片 base64 很容易超过 localStorage 5MB 配额，一旦写入失败会被静默吞掉
        （旧版 try/catch 空捕获）→ 保存按钮恒 disabled →「保存没反应」。v20 起：
        ① >200KB 的 dataUrl 自动外迁 IndexedDB，pending 只留 'blb:' 轻量引用；
@@ -2469,8 +2475,8 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         localStorage.setItem(PENDING_KEY, JSON.stringify(cur));
         return true;
       } catch (e) {
-        console.error('[gantt] 本地暂存写入失败：', e);
-        try { alert('⚠️ 本地暂存写入失败（浏览器存储空间不足）。\n请压缩图片（≤500KB）后重试，或先点「保存更改」把已有改动同步到 GitHub。'); } catch (e2) {}
+        console.error('[gantt] 本地队列写入失败：', e);
+        try { alert('⚠️ 改动没能进入本机队列（浏览器存储空间不足），本次保存未生效。\n请压缩图片（≤500KB）后重试。'); } catch (e2) {}
         return false;
       }
     }
@@ -2523,20 +2529,33 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         (p.attUploads && p.attUploads.length) ||
         (p.tipsImgUploads && p.tipsImgUploads.length)));
     }
-    /* 保存按钮状态：有未提交改动 → 绿色高亮「💾 保存更改」；无 → 灰「✅ 已同步」 */
+    /* 滞留改动条数 —— v41 语义：本地队列里**还留着**的内容 = 尝试写库但失败的改动。
+       正常路径（点保存 → 写库成功 → clearPending）下它恒为 0，所以这个计数就是「异常指示器」。 */
+    function stuckCount() {
+      var p = loadPending();
+      if (!p) return 0;
+      var n = 0;
+      if (p.ganttCode || p.events) n += 1;
+      ['sampleUploads', 'stepImgUploads', 'tipsImgUploads', 'attUploads'].forEach(function (k) {
+        if (p[k] && p[k].length) n += p[k].length;
+      });
+      return n;
+    }
+    /* v41：保存即写库，正常路径没有「待同步」这个中间态 —— 所以工具栏那个按钮默认隐藏。
+       只有写入失败、改动滞留在本地队列时才现身，明确告诉用户「有东西没存上」并给出立即重试入口。 */
     function syncSaveBtn() {
       var btn = toolbar.querySelector('[data-act="save"]');
       if (!btn) return;
-      if (hasPending()) {
-        btn.textContent = '💾 保存更改';
-        btn.style.background = '#dcfce7'; btn.style.borderColor = '#86efac'; btn.style.color = '#15803d';
+      var stuck = stuckCount();
+      if (stuck > 0) {
+        btn.style.display = '';
+        btn.textContent = '⚠️ 重试同步' + (stuck > 1 ? ' (' + stuck + ')' : '');
+        btn.style.background = '#fef3c7'; btn.style.borderColor = '#fcd34d'; btn.style.color = '#92400e';
         btn.disabled = false;
-        btn.title = '将本地所有改动一次性写回 GitHub（全班刷新即见）';
+        btn.title = '有 ' + stuck + ' 项改动没能写入数据库（页面会自动重试），点此立即重试';
       } else {
-        btn.textContent = '✅ 已同步';
+        btn.style.display = 'none';
         btn.style.background = ''; btn.style.borderColor = ''; btn.style.color = '';
-        btn.disabled = true;
-        btn.title = '当前无未保存的改动';
       }
     }
     /* 统一提交：读 pending → 先上传新资源（示例图/步骤图/附件）→
@@ -2718,29 +2737,30 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       }).then(function (effEvents) {
         clearPending();
         syncSaveBtn();
-        /* 手动保存（非静默）：写回成功后原地重建渲染（不再整页刷新，避免退出全屏）。
-           v40：用**对账后的** pending.ganttCode 重渲染 —— 它已经含「保留回来的远端条目」，
-           所以本页视图与刚写回的文件立即一致，不需要再靠 location.reload() 取回数据。
+        /* v41：这条分支只在「点工具栏 ⚠️ 重试同步」时走到（表单提交走 silent 路径）。
+           写库成功后原地重建渲染（不再整页刷新，避免退出全屏）。
+           v40：用**对账后的** pending.ganttCode 重渲染 —— 它已经含「并入保留回来的服务端条目」，
+           所以本页视图与刚写回的内容立即一致，不需要再靠 location.reload() 取回数据。
            effEvents 为写回后的正式数据（含 sampleUrl 直链）；无 gantt 改动时沿用当前 model 渲染 */
         if (!opts.silent) {
           reloadAfterSave(pending.ganttCode || Admin.serializeGantt(model), effEvents || eventsData);
           var notes = [];
-          if (renamedNote.length) notes.push('新条目原 id 已被远端占用，已改用 ' + renamedNote.join('、'));
-          if (keptGantt.length) notes.push('保留远端多出的任务 ' + keptGantt.join('、'));
-          if (mergedKeep.length) notes.push('保留远端新增的执行说明 ' + mergedKeep.join('、'));
+          if (renamedNote.length) notes.push('新条目原 id 已被占用，已改用 ' + renamedNote.join('、'));
+          if (keptGantt.length) notes.push('并入并保留了 ' + keptGantt.join('、'));
+          if (mergedKeep.length) notes.push('并入并保留了执行说明 ' + mergedKeep.join('、'));
           if (notes.length) {
             toast('ℹ️ 已保存；' + notes.join('；') + '（均未丢失）');
-            /* events.js 的保留条目只存在于远端文件里，本页 eventsData 拿不到 → 刷新一次取回，
+            /* events.js 的保留条目只存在于服务端文件里，本页 eventsData 拿不到 → 刷新一次取回，
                否则点这些任务会看不到执行说明。gantt 侧的保留条目已在上面的 reloadAfterSave 里生效。 */
             if (mergedKeep.length) setTimeout(function () { location.reload(); }, 1500);
           } else {
-            toast('✅ 已保存同步到 GitHub（含 deadlines.json 重建），全班刷新即见。');
+            toast('✅ 已保存到本机数据库，全班刷新即见。');
           }
         } else if (renamedNote.length || keptGantt.length) {
-          /* 静默路径（表单提交触发的立即同步 / 定时自动同步）本来刻意不重渲染，
-             但对账一旦发生（换过 id / 保留回了远端条目），本页 model 就与刚写回的文件不一致：
+          /* 静默路径（表单提交后的立即写库 / 定时兜底重试）本来刻意不重渲染，
+             但对账一旦发生（换过 id / 并入保留了服务端条目），本页 model 就与刚写回的内容不一致：
              不更新的话，用户接着编辑这条会**再次撞车**（每编辑一次 id 就换一次），
-             也看不到刚保留回来的远端任务。所以只在这两种「本页数据确实比远端旧」的情形补一次重渲染。 */
+             也看不到刚并入保留的服务端任务。所以只在这两种「本页数据确实比服务端旧」的情形补一次重渲染。 */
           reloadAfterSave(pending.ganttCode, effEvents || eventsData);
         }
         /* v33：把结果回传给调用方（handleSubmit / doDelete 的立即同步要用它决定提示什么） */
@@ -2753,7 +2773,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
           /* v33：表单提交触发的**自动**同步失败必须让用户看见 ——
              否则用户以为「点保存就已生效」，实际内容还挂在本地队列里（静默失败是最坏的体验）。
              用 toast 而非 alert（不打断连续编辑），但一定出声。 */
-          toast('⚠️ 改动已存在本机，但同步 GitHub 失败：' + (err && err.message ? err.message : err) + '。稍后会自动重试，也可点「保存更改」手动重试。');
+          toast('⚠️ 保存失败：' + (err && err.message ? err.message : err) + '。改动已留在本机，页面会自动重试（工具栏会出现「⚠️ 重试同步」）。');
           console.warn('[gantt] 表单提交触发的自动同步失败：', err && err.message ? err.message : err);
         }
         else console.warn('[gantt] 自动同步失败：', err && err.message ? err.message : err);
@@ -2847,7 +2867,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         '      </div></div></label></div>' +
         '  </div>' +
         '  <div class="f-actions">' +
-        '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">✓ 暂存更改</button>' +
+        '    <button type="submit" class="gv-tbtn primary" id="gv-crudsave">✓ 保存</button>' +
         '    <button type="button" class="gv-tbtn gv-crudcancel">取消</button>' +
         '  </div>' +
         '</form>';
@@ -2912,7 +2932,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       });
       syncKind();
 
-      /* v17：示例图上传预览 + 移除（图片仅暂存本地 pending，随「保存更改」统一上传） */
+      /* v17：示例图上传预览 + 移除（图片先放进本机队列，点保存时随本次写库一并上传） */
       var sampleFile = drawer.querySelector('[name=sampleFile]');
       var samplePrev = drawer.querySelector('#gv-sample-preview');
       var sampleRm = drawer.querySelector('#gv-sample-rm');
@@ -3065,6 +3085,13 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
     function openEditForm(task) { renderForm({ isNew: false, task: task, ev: eventsData[task.id] || null }); }
 
     function handleSubmit(opts, form) {
+      /* v41：保存 = 写库，按钮要给出「正在写」的反馈，同时防重复提交 */
+      var crudBtn = form.querySelector('#gv-crudsave');
+      function restoreCrudBtn() {
+        if (!crudBtn) return;
+        crudBtn.disabled = false;
+        crudBtn.textContent = '✓ 保存';
+      }
       var fd = new FormData(form);
       var name = String(fd.get('name') || '').trim();
       var completed = String(fd.get('completed') || 'undone');
@@ -3083,6 +3110,8 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       var crit = !!(opts.task && opts.task.crit && fd.get('keepCrit'));
       var start = Admin.parseDate(startStr);
       if (!start) { showFormErr(form, '开始日期无效，请选择有效日期'); return; }
+      /* 校验通过 → 进入「正在写库」态 */
+      if (crudBtn) { crudBtn.disabled = true; crudBtn.textContent = '保存中…'; }
       /* 合并可选时刻（HH:mm，24小时制）到 Date */
       function applyHM(d, hm) {
         var mm = /^(\d{1,2}):(\d{1,2})$/.exec(hm);
@@ -3216,32 +3245,36 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
           pendingPartial.attUploads = aups;
         }
       }
-      /* v33：本地暂存 + **立即同步**
-         用户要求「新增按钮弹窗点击保存后，应该触发立即同步」，不再只等 3 分钟自动同步。
-         管理员已登录 → 暂存后立刻静默 saveAll() 写回 GitHub（silent 避免与上面的原地重渲染重复刷新）；
-         未登录（只读访客）→ 维持纯本地暂存。
-         注意：同步成功后 pending 会被清空，这是正确语义（改动已进 GitHub，无需再挂本地队列）。 */
+      /* v41：**保存即写库** —— 不再有「暂存 → 手动点同步」两步。
+         本地队列（savePending）降级为「失败重试队列」：正常路径下写进去后马上被 saveAll 清空，
+         只有写库失败时才会留下内容，由 30 秒定时器自动重试。 */
       savePending(pendingPartial);
       touchModTs(id);   /* v33：记下「最近修改时间」，左侧事件列表据此把最新改动的条目排到最上面 */
-      /* 原地重渲染（不整页刷新，避免退出全屏）：用刚暂存的数据重建左列 + 重绘 */
+      /* 乐观更新：先本地重渲染（不等网络，点保存不卡顿），随后立刻写库 */
       reloadAfterSave(Admin.serializeGantt(newModel), needEvents ? newEvents : eventsData);
       if (G.GanttAdmin && G.GanttAdmin.isLoggedIn && G.GanttAdmin.isLoggedIn()) {
-        /* silent：写回成功后不再 reloadAfterSave（上面已做）；autoTriggered 让失败一定出声 */
+        /* silent：写库成功后不再 reloadAfterSave（上面已做）；autoTriggered 让**失败一定出声** */
         saveAll({ silent: true, autoTriggered: true }).then(function (r) {
+          restoreCrudBtn();
           if (r && r.saved) {
-            /* v40：本页数据比远端旧时，合并写回会保留远端多出的条目，甚至给本次新建的条目换 id ——
+            /* v40：本页数据比服务端旧时，合并写回会保留服务端多出的条目，甚至给本次新建的条目换 id ——
                这些都必须出声告知，否则用户会以为「我这条的 id 变了/图上多出来的东西哪来的」 */
             var extra = [];
-            if (r.renamed && r.renamed.length) extra.push('新条目原 id 已被远端占用，已改用 ' + r.renamed.join('、'));
-            if (r.keptGantt && r.keptGantt.length) extra.push('保留远端多出的任务 ' + r.keptGantt.join('、'));
-            if (r.kept && r.kept.length) extra.push('保留远端新增的执行说明 ' + r.kept.join('、'));
-            toast('✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」并同步到 GitHub' +
-              (extra.length ? '；' + extra.join('；') + '（未丢失）' : '，全班刷新即见。'));
+            if (r.renamed && r.renamed.length) extra.push('新条目原 id 已被占用，已改用 ' + r.renamed.join('、'));
+            if (r.keptGantt && r.keptGantt.length) extra.push('并入并保留了 ' + r.keptGantt.join('、'));
+            if (r.kept && r.kept.length) extra.push('并入并保留了执行说明 ' + r.kept.join('、'));
+            toast('✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」' +
+              (extra.length ? '；' + extra.join('；') + '（未丢失）' : '，已写入数据库，全班刷新即见。'));
+          } else if (r && r.empty) {
+            /* 队列根本没写进去（localStorage 配额满）→ 这次保存压根没发生，必须出声，
+               否则就是「点了保存、什么都没发生」的最差体验 */
+            toast('⚠️ 改动没能进入本机队列（浏览器存储可能已满），本次保存未生效，请压缩图片后重试。');
           }
-          /* 失败分支已在 saveAll 内部 toast，这里不重复 */
+          /* 其余失败分支已在 saveAll 内部 toast，这里不重复 */
         });
       } else {
-        toast('已暂存到本地（当前未登录管理员，需登录后点「保存更改」写回 GitHub）');
+        restoreCrudBtn();
+        toast('已存到本机浏览器（当前未登录管理员，登录后会自动写入数据库）');
       }
     }
 
@@ -3252,7 +3285,7 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         '<div class="gv-dhead">🗑 删除确认</div>' +
         '<div class="gv-confirm">确定删除 <b>「' + esc(task.name) + '」</b> 吗？<br>' +
         (ev ? '该条目含执行说明，将<b>同时删除其执行说明</b>。' : '') +
-        '删除会先暂存在本地，点工具栏「保存更改」后统一写回并对全班生效。</div>' +
+        '删除会<b>立即写入数据库</b>并对全班生效。</div>' +
         '<div class="f-actions"><button class="gv-tbtn gv-delconfirm" style="background:#dc2626;color:#fff;border-color:#dc2626">确认删除</button><button class="gv-tbtn gv-crudcancel">取消</button></div>';
       drawer.querySelector('.gv-close').addEventListener('click', closeDetail);
       drawer.querySelector('.gv-crudcancel').addEventListener('click', closeDetail);
@@ -3267,8 +3300,8 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         })
       };
       var msg = 'delete: ' + task.id + ' ' + task.name;
-      /* v33：本地暂存 + **立即同步**（同 handleSubmit）。
-         delIds 记账：只有在这里登记过的 id，合并写回时才允许从远端 events.js 消失 */
+      /* v41：删除同样「即写库」（同 handleSubmit）。
+         delIds 记账：只有在这里登记过的 id，合并写回时才允许从服务端 events.js 消失 */
       savePending({
         ganttCode: Admin.serializeGantt(newModel),
         events: ev ? buildEvents(task.id, null) : undefined,
@@ -3276,20 +3309,20 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         desc: msg
       });
       touchModTs(task.id);   /* v33：删除也刷新修改时间，保证列表排序稳定（条目已移除，仅留痕） */
-      /* 原地重渲染（不整页刷新，避免退出全屏） */
+      /* 乐观更新：先本地重渲染（不等网络） */
       reloadAfterSave(Admin.serializeGantt(newModel), ev ? buildEvents(task.id, null) : eventsData);
       if (G.GanttAdmin && G.GanttAdmin.isLoggedIn && G.GanttAdmin.isLoggedIn()) {
         saveAll({ silent: true, autoTriggered: true }).then(function (r) {
           if (r && r.saved) {
             var extra = [];
-            if (r.keptGantt && r.keptGantt.length) extra.push('保留远端多出的任务 ' + r.keptGantt.join('、'));
-            if (r.kept && r.kept.length) extra.push('保留远端新增的执行说明 ' + r.kept.join('、'));
-            toast('✅ 已删除「' + task.name + '」并同步到 GitHub' +
-              (extra.length ? '；' + extra.join('；') + '（未丢失）' : '，全班刷新即见。'));
+            if (r.keptGantt && r.keptGantt.length) extra.push('并入并保留了 ' + r.keptGantt.join('、'));
+            if (r.kept && r.kept.length) extra.push('并入并保留了执行说明 ' + r.kept.join('、'));
+            toast('✅ 已删除「' + task.name + '」' +
+              (extra.length ? '；' + extra.join('；') + '（未丢失）' : '，已写入数据库，全班刷新即见。'));
           }
         });
       } else {
-        toast('已暂存到本地（当前未登录管理员，需登录后点「保存更改」写回 GitHub）');
+        toast('已存到本机浏览器（当前未登录管理员，登录后会自动写入数据库）');
       }
     }
 
@@ -3301,8 +3334,9 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
     /* 提醒角标 & 弹窗可被后续 data 变化刷新 */
     try { remUpdateBadge(); } catch (e) {}
 
-    /* v17：每 3 分钟自动同步——管理员登录态且本地有未提交改动时，静默写回 GitHub（成功不清空页面，免打扰） */
-    var AUTO_SYNC_MS = 3 * 60 * 1000;
+    /* v41：保存即写库之后，定时器只剩**失败兜底**职责 —— 只有改动因服务/网络异常滞留在本地队列时才会真的发请求。
+       间隔从 3 分钟收紧到 30 秒（本机服务，重试几乎零成本），让偶发失败迅速自愈。 */
+    var AUTO_SYNC_MS = 30 * 1000;
     var autoSyncTimer = null;
     function autoSyncTick() {
       var adminNow = (G.GanttAdmin && G.GanttAdmin.isLoggedIn) ? G.GanttAdmin.isLoggedIn() : false;

@@ -156,7 +156,7 @@
       ⑥ <b>定位</b>：点击左侧事件名称 → 自动滚动到该事件日期并高亮闪烁<br>
       ⑦ <b>今日截止提醒</b>：工具栏 <b>🔔 提醒</b> 列出「<b>截止日期就在今天</b>」的全部待办（按截止时刻从早到晚排序），时间精确到分钟；弹窗底部可
       <b>📅 加入系统日历</b>（.ics，到点由系统日历闹铃响，能穿透静音）、<b>⏰ 同步系统闹钟</b>（只对<b>今天开始</b>的条目，各建一个<b>开始前 15 分钟</b>的闹钟，标签 = <b>名称｜地点｜开始→结束时间</b>）、<b>📋 复制清单</b>、<b>🔗 订阅地址</b><br>
-      ⑧ <b>保存同步</b>：管理员登录后，在弹窗里点「保存」即<b>立即写入本机数据库</b>（无需再点工具栏按钮）；也可按 <b>Ctrl + S</b>（Mac 为 ⌘ + S）= 点「💾 保存更改」手动同步。未登录时改动只暂存在本机<br>
+      ⑧ <b>保存</b>：管理员登录后，在弹窗里点「保存」即<b>实时写入本机数据库</b>，无需任何二次操作，全班刷新即见；若写入失败，改动会留在本机并在 30 秒内自动重试（此时工具栏会出现「⚠️ 重试同步」，可立即手动重试）<br>
       ⑨ <b>左侧事件列表</b>：<b>最新修改</b>的事件/时间点自动排在<b>最上面</b>（每条带 <b>#序号</b> 与 <b>事件/时间点</b> 角标）；条目多时列表内可<b>上下滚动</b><br>
       红色竖线共 <b>2 条</b>：实线 = <b>当前时刻</b>（每分钟自动移动），虚线 = <b>今日 24:00</b>，随<b>打开当天</b>自动更新
     </div>
@@ -170,7 +170,7 @@
   <div class="admin-card">
     <button class="admin-close" id="adminClose" aria-label="关闭">✕</button>
     <h3>🔒 管理员登录</h3>
-    <p class="admin-sub">输入本机管理员口令，登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与执行说明；新增或编辑在弹窗里点「保存」后会<strong>立即写入本机数据库</strong>，刷新即见（未登录时改动只暂存在本机）。<br>口令由项目根目录 <code>.env</code> 里的 <code>ADMIN_PASSWORD</code> 决定；登录令牌只存在浏览器本地。</p>
+    <p class="admin-sub">输入本机管理员口令，登录后即可在点开的详情弹窗里<strong>新增 / 编辑 / 删除</strong>事件、时间点与执行说明；<strong>点「保存」即实时写入本机数据库</strong>，无需再点任何同步按钮，全班刷新即见。写入失败时改动会留在本机并自动重试。<br>口令由项目根目录 <code>.env</code> 里的 <code>ADMIN_PASSWORD</code> 决定；登录令牌只存在浏览器本地。</p>
     <label>管理员口令
       <input type="password" id="adminToken" placeholder=".env 里的 ADMIN_PASSWORD" autocomplete="off">
     </label>
@@ -248,12 +248,18 @@
   (async function boot() {
     let code;
     let events = window.BJTU_EVENTS || {};
-    // 优先读取本地待提交改动（管理员增删改后、未点「保存更改」前，先用本地数据渲染）
+    // v41：本地队列只在「写入失败」时才会留下内容 —— 存在即说明有改动没进数据库。
+    // 先用它渲染（免得用户看到自己的改动「消失」），同时在顶部提示，并等 30 秒自动重试。
     let pending = null;
     try { pending = JSON.parse(localStorage.getItem('gantt_pending') || 'null'); } catch (e) { pending = null; }
     if (pending && pending.ganttCode) {
       code = pending.ganttCode;
       events = pending.events || events;
+      const nt = document.getElementById('notice');
+      if (nt) {
+        nt.innerHTML = '⚠️ 本机还留着<b>尚未写入数据库</b>的改动，已先用它渲染；页面会在 30 秒内自动重试写入。';
+        nt.style.display = 'block';
+      }
     } else {
       try {
         code = await loadGanttCode();
