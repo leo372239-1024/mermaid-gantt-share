@@ -727,5 +727,126 @@ const ymd0 = t0.start.getFullYear() + '-' + p2(t0.start.getMonth() + 1) + '-' + 
 check(model.all.filter(t => S.searchHits(t, ymd0, model.all.indexOf(t) + 1, evOf(t)).hit).indexOf(t0) >= 0,
   '真实数据：用某条的完整日期搜它，自己必在结果里（' + ymd0 + '）');
 
+/* ---- 15. gantt.md 合并写回 + id 对账（v40：回归 2026-10-09 m19「团推优会议」被覆盖事故） ---- */
+console.log('[15] gantt.md 合并写回 + 新增条目 id 对账');
+/* 事故复盘（线上提交为证）：
+     38d2865  sync: add: m19 团推优会议
+     ef18082  sync: add: m19 交积极分子材料      ← 把上一条整行替换掉
+   成因：genId 只扫本页 model → 页面过期（远端已有 m19、本页没有）时新条目又被分配 m19；
+   而 gantt.md 是整块替换，旧护栏 precheckDrift 只比「id 集合」→ 撞车后集合一致 → 判为无漂移 →
+   静默覆盖，前端照常弹「已同步」。下面把这条链路的每一环都钉死。 */
+const remoteAcc = [
+  'gantt',
+  '    title 班级甘特图',
+  '    dateFormat YYYY-MM-DD HH:mm',
+  '    axisFormat %Y-%m',
+  '    section 入学前准备',
+  '    体检 :milestone, m13, 2026-09-01 08:00, 2026-09-01 08:00',
+  '    section 新增事项',
+  '    反馈心理测评完成情况3 :milestone, m14, 2026-09-20 12:35, 2026-09-20 12:35',
+  '    团推优会议 :milestone, m19, 2026-10-12 20:00, 2026-10-12 20:00'
+].join('\n');
+/* 过期页面：model 里没有 m19（等价于「页面在 m19 写入之前就打开了」） */
+const localStale = [
+  'gantt',
+  '    title 班级甘特图',
+  '    dateFormat YYYY-MM-DD HH:mm',
+  '    axisFormat %Y-%m',
+  '    section 入学前准备',
+  '    体检 :milestone, m13, 2026-09-01 08:00, 2026-09-01 08:00',
+  '    section 新增事项',
+  '    反馈心理测评完成情况3 :milestone, m14, 2026-09-20 12:35, 2026-09-20 12:35'
+].join('\n');
+/* 过期页面 + 本页又新增了一条，而 genId 撞到了远端已占用的 m19（真实事故的形状） */
+const localClash = localStale + '\n    交积极分子材料 :milestone, m19, 2026-10-13 12:00, 2026-10-13 12:00';
+
+/* 15a 任务行 → id：状态词 / 日期 / 名称里的逗号与时刻都不能骗过它 */
+check(Admin.taskIdOfLine('    团推优会议 :milestone, m19, 2026-10-12 20:00, 2026-10-12 20:00') === 'm19',
+  '15a.1 带 milestone 状态的任务行能取出 id（m19）');
+check(Admin.taskIdOfLine('    网课考试 :t31, 2026-12-14, 2026-12-20') === 't31',
+  '15a.2 无状态的任务行能取出 id（t31）');
+check(Admin.taskIdOfLine('    例会, 周四 :milestone, m9, 2026-09-18 12:00, 2026-09-18 12:00') === 'm9',
+  '15a.3 名称里带逗号也不误判（按「冒号后第一个非状态/非日期段」取 id）');
+check(Admin.taskIdOfLine('    数据科学与知识工程(周二·11.03 08:00-09:50 YF305) :k1w09, 2026-11-03 08:00, 2026-11-03 09:50') === 'k1w09',
+  '15a.4 ★ 名称里带时刻（08:00）时不能把名称里的冒号当分隔符（课程行是最容易踩的样本）');
+check(Admin.taskIdOfLine('    section 新增事项') === '' && Admin.taskIdOfLine('    dateFormat YYYY-MM-DD HH:mm') === '',
+  '15a.5 section 行与 dateFormat 行（含 HH:mm 的冒号）都不会被当成任务行');
+check(Admin.taskIdOfLine('') === '' && Admin.taskIdOfLine('    只写了名称没有字段') === '',
+  '15a.6 空行 / 无字段行返回空');
+
+/* 15b 结构切分 */
+const st = Admin.mermaidStructure(remoteAcc);
+check(st.head.length === 4 && st.head[0] === 'gantt', '15b.1 头部指令（gantt/title/dateFormat/axisFormat）被正确切出（' + st.head.length + ' 行）');
+check(st.sections.map(s => s.name).join('|') === '入学前准备|新增事项',
+  '15b.2 section 名称与顺序保持（' + st.sections.map(s => s.name).join('|') + '）');
+check(Object.keys(Admin.taskIdsIn(remoteAcc)).sort().join(',') === 'm13,m14,m19',
+  '15b.3 一份代码里的全部任务 id 可枚举（' + Object.keys(Admin.taskIdsIn(remoteAcc)).sort().join(',') + '）');
+
+/* 15c 合并写回：远端有、本页没有的条目一律保留 */
+const mg = Admin.mergeGantt(remoteAcc, localStale, []);
+check(mg.kept.join(',') === 'm19', '15c.1 本页缺 m19 → 判为「要保留」（' + mg.kept.join(',') + '）');
+check(/团推优会议 :milestone, m19, 2026-10-12 20:00, 2026-10-12 20:00/.test(mg.code),
+  '15c.2 保留的是**原文那一行**（连时刻 20:00 都逐字带回来）');
+check(Admin.mergeGantt(remoteAcc, remoteAcc, []).kept.length === 0,
+  '15c.3 本页与远端一致 → 无保留项（不会重复写入）');
+check(Admin.mergeGantt(remoteAcc, localStale, ['m19']).kept.length === 0,
+  '15c.4 显式删除名单里有 m19 → 不再保留（删除功能不会被合并写回"复活"）');
+check(Admin.mergeGantt(remoteAcc, localStale, []).code.split('\n').filter(l => /^ {4}section /.test(l)).map(l => l.trim()).join('|') ===
+  'section 入学前准备|section 新增事项',
+  '15c.5 保留时并回**同名 section**，不新造 section（不把 gantt.md 写脏）');
+/* 远端有本页完全没有的 section → 该 section 连同条目一起带回来 */
+const remoteNewSec = remoteAcc + '\n    section 临时事项\n    占位 :milestone, m20, 2026-10-20 09:00, 2026-10-20 09:00';
+const mgSec = Admin.mergeGantt(remoteNewSec, localStale, []);
+check(mgSec.kept.join(',') === 'm19,m20' && /section 临时事项/.test(mgSec.code),
+  '15c.6 远端新增的整个 section 也会带回来（' + mgSec.kept.join(',') + '）');
+
+/* 15d id 对账：本页新建的 id 与远端撞车 → 换号，绝不覆盖远端那条 */
+const rec = Admin.reconcileGantt(remoteAcc, localClash, [], ['m19']);
+check(rec.renames && rec.renames.m19 === 'm20',
+  '15d.1 撞车的 m19 被换成 m20（' + JSON.stringify(rec.renames) + '）');
+check(/交积极分子材料 :milestone, m20, 2026-10-13 12:00, 2026-10-13 12:00/.test(rec.code),
+  '15d.2 换号只动 id 字段，日期/名称/状态逐字保留');
+check(/团推优会议 :milestone, m19, 2026-10-12 20:00, 2026-10-12 20:00/.test(rec.code),
+  '15d.3 ★ 远端「团推优会议」原文保留 —— 这正是 10-09 丢掉的那一条');
+check(rec.kept.join(',') === 'm19',
+  '15d.4 换号后 m19 变成「远端有、本页没有」→ 如实计入保留名单（' + rec.kept.join(',') + '）');
+check((rec.code.match(/m19,/g) || []).length === 1 && (rec.code.match(/m20,/g) || []).length === 1,
+  '15d.5 换号后全文各 id 唯一，不会出现两条同 id');
+check(Object.keys(Admin.taskIdsIn(rec.code)).length === 4,
+  '15d.6 对账后任务总数为 4（m13/m14/m19/m20），一条不多一条不少');
+/* 非「本页新建」的既有条目即使与远端同 id 也不换号（那是正常的本地覆盖远端） */
+check(Object.keys(Admin.reconcileGantt(remoteAcc, localStale, [], []).renames).length === 0,
+  '15d.7 编辑既有条目（未登记为新建）不换号 —— 避免每次保存都改 id');
+check(Object.keys(Admin.reconcileGantt(remoteAcc, remoteAcc, [], ['m30']).renames).length === 0,
+  '15d.8 本页新建的 id 若远端没有，不换号（无谓的换号会打断用户对 id 的记忆）');
+/* 撞两次：新 id 又被占用 → 继续往后找 */
+const usedAll = { m19: 1, m20: 1, m21: 1 };
+check(Admin.nextFreeId('m19', usedAll) === 'm22', '15d.9 连续占用时取下一个空位（m19→m22）');
+check(Admin.nextFreeId('t31', { t31: 1, t32: 1 }) === 't33', '15d.10 其它前缀同样适用（t31→t33）');
+/* 15e 幂等：对账结果再对账一次不应再变（否则每次保存都会改 id） */
+const rec2 = Admin.reconcileGantt(remoteAcc, rec.code, [], ['m20']);
+check(Object.keys(rec2.renames).length === 0 && rec2.code === rec.code,
+  '15e.1 对账是幂等的（第二次不再换号、内容逐字不变）');
+/* 15f 真实数据：拿线上 gantt.md 跑一遍，必须「一条都不丢」 */
+const realGanttMermaid = (function () {
+  const md = fs.readFileSync(path.join(ROOT, 'gantt.md'), 'utf8');
+  const m = /```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(md);
+  return m ? m[1] : '';
+})();
+const realIds = Object.keys(Admin.taskIdsIn(realGanttMermaid)).sort();
+const modelIds = model.all.map(t => t.id).filter(Boolean).sort();
+check(realIds.join(',') === modelIds.join(','),
+  '15f.1 ★ taskIdOfLine 取出的 id 集合与解析器**完全相等**（' + realIds.length + ' 条，含 114 条名称带时刻的课程行）');
+/* 本页只有前一半任务（模拟过期页面）→ 合并后另一半必须全部回来 */
+const half = model.all.slice(0, Math.floor(model.all.length / 2));
+const halfCode = 'gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %Y-%m\n    section 新增事项\n' +
+  half.map(t => '    ' + Admin.taskLine(t)).join('\n');
+const mgReal = Admin.mergeGantt(realGanttMermaid, halfCode, []);
+check(mgReal.kept.length === model.all.length - half.length,
+  '15f.2 真实数据：过期页面写回时，远端另一半 ' + mgReal.kept.length + ' 条全部保留（一条不丢）');
+const mgRealIds = Object.keys(Admin.taskIdsIn(mgReal.code));
+check(mgRealIds.length === model.all.length,
+  '15f.3 真实数据：合并产物覆盖全部 ' + model.all.length + ' 条 id（无重复、无缺失）');
+
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

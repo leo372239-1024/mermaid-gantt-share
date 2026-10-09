@@ -94,7 +94,13 @@
        为什么放在末尾：保持既有 section 顺序不变（避免每次保存都重排 gantt.md 产生无意义 diff）。 */
     var known = {};
     (model.sections || []).forEach(function (sec) { known[sec.name] = true; });
-    var sections = (model.sections || []).slice();
+    /* v40：逐层复制（数组 + section 对象 + tasks 数组），让本函数保持**纯函数**。
+       旧写法 `.slice()` 只复制了外层数组，下面「把孤立任务并入已存在的兜底 section」那一步
+       会顺手改到调用方 model 里的 section 对象 —— 同一个 model 序列化两次就会把孤立任务写两遍。
+       当前调用点恰好不会踩到（handleSubmit 里 secExists 与 orphans 互斥），但这是个哑雷。 */
+    var sections = (model.sections || []).map(function (sec) {
+      return { name: sec.name, tasks: (sec.tasks || []).slice() };
+    });
     /* 兜底 section 的三种情形（2026-09-19 修复「新增条目被静默丢弃」）：
        ①无孤立任务 → 什么都不做（凭空造空 section 会把 gantt.md 写脏）；
        ②有孤立任务且兜底 section 尚不存在 → 在**末尾**新补一个承载它们；
@@ -124,6 +130,207 @@
       sec.tasks.forEach(function (t) { L.push('    ' + taskLine(t)); });
     });
     return L.join('\n');
+  }
+
+  /* ---------- gantt.md（mermaid 块）的合并写回与 id 对账 ----------
+     与 events.js 的 keepBlocks 同源思路：写回 = 「本页为准」+「远端本页未知的条目按原文保留」。
+     为什么必须做（2026-10-09 真实数据丢失事故）：
+       线上 gantt.md 曾出现两次同 id 的提交 ——
+         38d2865  sync: add: m19 团推优会议
+         ef18082  sync: add: m19 交积极分子材料      ← 把上一条整行替换掉了
+       成因是 genId 只扫**本页 model**：页面数据过期（远端已有 m19、本页没有）时，
+       新条目又被分配成 m19；而 gantt.md 当时是**整块替换**，
+       旧护栏 precheckDrift 只比对「id 集合」，撞车后两边集合完全一致 → 判为「无漂移」→
+       一句提示都没有，远端的「团推优会议」被静默覆盖，前端照常弹「已同步」。
+       本段提供两道根治护栏：
+         ① mergeGantt     —— 远端有、本页没有、且未被显式删除的任务行一律保留（只少写，不删）
+         ② reconcileGantt —— 「本页新建」的 id 若已被远端占用，换一个两边都没占用的 id
+     */
+
+  /* 任务行里「状态词」全集（与 taskLine 的输出严格对应） */
+  var STATE_WORDS = { milestone: 1, crit: 1, done: 1, active: 1 };
+  /* 头部指令行（不是任务行）—— 与 js/parser.js 第 89~91 行识别的指令集合保持一致 */
+  var HEAD_LINE = /^(gantt|title|dateFormat|axisFormat|excludes|topAxis|todayMarker|inclusiveEndDates|barGap|barHeight|useMaxWidth)\b/;
+  /* 日期 token（含可选时分）—— 与 js/parser.js 的 toDateT 同一形状 */
+  var DATE_TOKEN = /^\d{4}-\d{1,2}-\d{1,2}(?:\s+\d{1,2}:\d{1,2})?$/;
+
+  /* 「冒号右侧是不是合法属性开头」—— 与 js/parser.js 的 isAttrStart 同口径。
+     为什么必须用这条规则而不是 indexOf(':')：任务名里可能含时刻
+     （如「数据科学与知识工程(周二·11.03 08:00-09:50 YF305) :k1w09, …」），
+     名称里的那个冒号右侧是「00-09:50 YF305) :k1w09」——不是合法属性开头，会被跳过。 */
+  function isAttrStart(head) {
+    if (!head) return false;
+    var tok = String(head).split(',')[0].trim();
+    if (!tok) return false;
+    if (STATE_WORDS[tok]) return true;
+    if (/^after\s+[^\s,]+$/i.test(tok)) return true;
+    if (DATE_TOKEN.test(tok)) return true;
+    if (/^\d+d$/i.test(tok)) return true;
+    if (/^[\w.#-]+$/.test(tok)) return true;
+    return false;
+  }
+
+  /* 按「名称:属性」切分任务行（与 js/parser.js 第 103~109 行同口径）。
+     test/unit.js [15f] 用真实 gantt.md 断言两者取出的 id 集合**完全相等** ——
+     一旦解析器改了切分规则，这条断言会立刻红，不会让两套口径悄悄漂移。 */
+  function splitTaskLine(line) {
+    var s = String(line == null ? '' : line).replace(/\r$/, '');
+    for (var i = 0; i < s.length; i++) {
+      if (s.charAt(i) !== ':') continue;
+      var candRaw = s.slice(i + 1).trim();
+      var candName = s.slice(0, i).trim();
+      if (candName && isAttrStart(candRaw)) {
+        return {
+          name: candName,
+          colon: i,
+          head: s.slice(0, i + 1),          /* 「缩进 + 名称 + 冒号」原文（含缩进，换号时逐字保留） */
+          attr: s.slice(i + 1),            /* 冒号之后的属性原文 */
+          tokens: candRaw.split(',').map(function (t) { return t.trim(); }).filter(Boolean)
+        };
+      }
+    }
+    return null;
+  }
+
+  /* 任务行 → id（认不出返回 ''）。id 的语义位置是「属性段里第一个既不是状态词、
+     不是 after 依赖、也不是日期/时长的 token」。 */
+  function taskIdOfLine(line) {
+    var s = String(line == null ? '' : line).replace(/\r$/, '');
+    var t = s.trim();
+    if (!t) return '';
+    if (/^section\s/.test(t)) return '';
+    if (HEAD_LINE.test(t)) return '';
+    if (t.charAt(0) === '#' || t.charAt(0) === '%') return '';   /* mermaid 注释 */
+    var sp = splitTaskLine(t);
+    if (!sp) return '';
+    for (var k = 0; k < sp.tokens.length; k++) {
+      var p = sp.tokens[k];
+      if (STATE_WORDS[p]) continue;
+      if (/^after\s+/i.test(p)) continue;
+      if (DATE_TOKEN.test(p)) return '';     /* 已经走到日期了 → 本行没有 id */
+      if (/^\d+d$/i.test(p)) return '';
+      return p;
+    }
+    return '';
+  }
+
+  /* mermaid 代码块 → 结构：{ head:[...], sections:[{name, lines:[...]}], orphans:[...] }
+     head   = 第一个 section 之前的头部指令（gantt / title / dateFormat / axisFormat）
+     orphans= section 之前出现的任务行（异常结构，保留但不参与合并定位） */
+  function mermaidStructure(code) {
+    var lines = String(code == null ? '' : code).replace(/\r\n/g, '\n').split('\n');
+    var head = [], sections = [], orphans = [], cur = null, seenSection = false;
+    lines.forEach(function (line) {
+      var t = line.trim();
+      if (!t) return;
+      if (/^section\s+/.test(t)) {
+        seenSection = true;
+        cur = { name: t.replace(/^section\s+/, '').trim(), lines: [] };
+        sections.push(cur);
+        return;
+      }
+      if (HEAD_LINE.test(t)) { head.push(line); return; }
+      if (!seenSection) { orphans.push(line); return; }
+      if (cur) cur.lines.push(line);
+    });
+    return { head: head, sections: sections, orphans: orphans };
+  }
+
+  /* 收集一份 mermaid 代码里的全部任务 id */
+  function taskIdsIn(code) {
+    var out = {};
+    mermaidStructure(code).sections.forEach(function (s) {
+      s.lines.forEach(function (l) { var id = taskIdOfLine(l); if (id) out[id] = 1; });
+    });
+    return out;
+  }
+
+  /* 把 mermaid 里 id 为 oldId 的任务行改成 newId（只动 id 那一段，其余逐字保留） */
+  function renameTaskIdInCode(code, oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return code;
+    return String(code == null ? '' : code).split('\n').map(function (line) {
+      if (taskIdOfLine(line) !== oldId) return line;
+      var sp = splitTaskLine(line);
+      if (!sp) return line;
+      var parts = sp.attr.split(',');
+      for (var k = 0; k < parts.length; k++) {
+        if (parts[k].trim() === oldId) {
+          parts[k] = parts[k].replace(oldId, newId);   /* 保留原有空格 */
+          return sp.head + parts.join(',');
+        }
+      }
+      return line;
+    }).join('\n');
+  }
+
+  /* 取一个两边都没占用的 id（保持原前缀与「数字递增」风格：m19 → m20 → m21…） */
+  function nextFreeId(base, used) {
+    var m = /^([A-Za-z_]*)(\d*)$/.exec(String(base == null ? '' : base));
+    var pre = (m && m[1]) ? m[1] : String(base == null ? '' : base) || 'x';
+    var n = (m && m[2]) ? parseInt(m[2], 10) : 0;
+    var cand;
+    do { n++; cand = pre + n; } while (used && used[cand]);
+    return cand;
+  }
+
+  /* 合并写回：远端有、本页没有、且不在显式删除名单里的任务行 → 按原 section 逐字保留。
+     返回 { code, kept:[id…] }。kept 供前端告知用户「保留了什么」。
+     认不出 id 的远端行也一律保留 —— 宁多不少（多写的行解析器会忽略，丢了的行找不回来）。 */
+  function mergeGantt(remoteCode, localCode, delIds) {
+    var local = mermaidStructure(localCode);
+    var remote = mermaidStructure(remoteCode);
+    var del = delIds || [];
+    var localIds = taskIdsIn(localCode);
+    var kept = [];
+    function put(name, line) {
+      var target = null;
+      local.sections.forEach(function (s) { if (s.name === name) target = s; });
+      if (!target) { target = { name: name || FALLBACK_SECTION, lines: [] }; local.sections.push(target); }
+      target.lines.push(line);
+    }
+    remote.sections.forEach(function (rs) {
+      rs.lines.forEach(function (line) {
+        var id = taskIdOfLine(line);
+        if (id) {
+          if (localIds[id] || del.indexOf(id) >= 0) return;   /* 本页已有 / 本页显式删除 → 不保留 */
+          localIds[id] = 1;
+          kept.push(id);
+        } else if (!String(line).trim()) {
+          return;
+        }
+        put(rs.name, line);
+      });
+    });
+    remote.orphans.forEach(function (line) { put(FALLBACK_SECTION, line); });
+    var out = local.head.slice();
+    local.sections.forEach(function (s) {
+      out.push('    section ' + s.name);
+      s.lines.forEach(function (l) { out.push(l); });
+    });
+    return { code: out.join('\n'), kept: kept };
+  }
+
+  /* 写回前的对账（纯函数，test/unit.js 有断言）：
+     ① 本页**新建**的 id 若已被远端占用 → 换 id（否则合并后会出现两条同 id，详情映射会错乱）
+     ② 远端多出的条目 → 合并保留
+     newIds：本页本次新建的 id 清单（由 viewer 记账）。只对「新建」的 id 做换号 ——
+     本页对既有条目的编辑（update）不换号，那是正常的「本地覆盖远端」。 */
+  function reconcileGantt(remoteCode, localCode, delIds, newIds) {
+    var code = String(localCode == null ? '' : localCode);
+    var renames = {};
+    if (!code) return { code: code, kept: [], renames: renames };
+    var used = taskIdsIn(code);
+    var remoteIds = taskIdsIn(remoteCode);
+    Object.keys(remoteIds).forEach(function (k) { used[k] = 1; });
+    (newIds || []).forEach(function (id) {
+      if (!id || !remoteIds[id]) return;      /* 只在「与远端撞车」时换号 */
+      var next = nextFreeId(id, used);
+      renames[id] = next;
+      used[next] = 1;
+      code = renameTaskIdInCode(code, id, next);
+    });
+    var merged = mergeGantt(remoteCode, code, delIds);
+    return { code: merged.code, kept: merged.kept, renames: renames };
   }
 
   /* ---------- 序列化：events 数据 → events.js 全文 ---------- */
@@ -388,6 +595,16 @@
     REPO: REPO,
     FALLBACK_SECTION: FALLBACK_SECTION,
     serializeGantt: serializeGantt,
+    /* v40：gantt.md 的合并写回 / id 对账（纯函数，test/unit.js [15] 直接断言） */
+    splitTaskLine: splitTaskLine,
+    isAttrStart: isAttrStart,
+    taskIdOfLine: taskIdOfLine,
+    mermaidStructure: mermaidStructure,
+    taskIdsIn: taskIdsIn,
+    renameTaskIdInCode: renameTaskIdInCode,
+    nextFreeId: nextFreeId,
+    mergeGantt: mergeGantt,
+    reconcileGantt: reconcileGantt,
     serializeEvents: serializeEvents,
     blocksOf: blocksOf,
     keepBlocks: keepBlocks,

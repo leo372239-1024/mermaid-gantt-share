@@ -2448,6 +2448,15 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         partial.delIds.forEach(function (id) { if (id && merged.indexOf(id) < 0) merged.push(id); });
         cur.delIds = merged;
       }
+      /* newIds：本页**新建**的 id（新增时间点/事件时记账）。
+         v40：写回对账靠它区分「本页新建」与「本页编辑」—— 只有前者才可能在页面过期时
+         与远端已存在的 id 撞车（genId 只扫本页 model）。同 delIds，只累加、只增不减：
+         某次对账换过号之后，pending.newIds 里的旧 id 也已同步改成新 id（见 doSaveAll）。 */
+      if (partial.newIds !== undefined && partial.newIds.length) {
+        var mergedNew = (cur.newIds || []).slice();
+        partial.newIds.forEach(function (id) { if (id && mergedNew.indexOf(id) < 0) mergedNew.push(id); });
+        cur.newIds = mergedNew;
+      }
       /* v17：待上传示例图队列 */
       if (partial.sampleUploads !== undefined) cur.sampleUploads = partial.sampleUploads || [];
       /* v19：待上传步骤图队列 + 附件队列 */
@@ -2619,40 +2628,48 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         var m = /```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(String(src || ''));
         return m ? m[1] : '';
       }
-      function taskIdsOf(code) {
-        var mdl = code ? Parser.parse(code) : null;
-        return ((mdl && mdl.all) || []).map(function (t) { return t.id; }).filter(Boolean);
-      }
 
-      /* 写回前体检（必须在任何写操作之前，避免「gantt.md 已写、events.js 中止」的半成品状态）：
-         events.js 已改为**合并写回**（本页没有的远端条目按原文逐字保留），不会丢数据，故不再体检；
-         但 gantt.md 是「整块替换」，本页 model 若来自过期页面，写回会把远端新增的任务删掉。
-         判定：远端有、本页没有、且不是本次显式删除的 id。 */
-      function precheckDrift() {
+      /* 写回前对账（必须在任何写操作之前，避免「gantt.md 已写、events.js 中止」的半成品状态）。
+         v40 起 gantt.md 也是**合并写回**，所以这里不再「体检后弹框/跳过」，而是就地修正：
+           ① 本页新建的 id 与远端撞车 → 换一个未占用的 id（否则合并后两条同 id，详情映射错乱）
+           ② 远端多出的条目 → 交给 Admin.reconcileGantt 按原文保留（页面过期只少写、不删）
+         为什么删掉旧的 precheckDrift：它只比对「id 集合」，撞车后两边集合完全一致 → 判为无漂移 →
+         一句提示都没有就整块覆盖（2026-10-09 m19「团推优会议」被静默覆盖，就是这条盲区）；
+         而它的兜底手段是 window.confirm「点确定就把远端条目删掉」——把删数据的决定权交给了
+         只想保存自己改动的用户。合并写回从机制上消灭了这两种坏情况。
+         远端读不到（离线/限流）时降级为「按本页原样写回」，不阻断保存。 */
+      var renamedNote = [];
+      var keptGantt = [];
+      function reconcile() {
         if (!pending.ganttCode) return Promise.resolve();
         return Admin.getFile('gantt.md').then(function (f) {
-          var local = taskIdsOf(pending.ganttCode);
-          var del = delIds();
-          var missing = taskIdsOf(mermaidOf(f.content)).filter(function (id) {
-            return local.indexOf(id) < 0 && del.indexOf(id) < 0;
+          var rec = Admin.reconcileGantt(mermaidOf(f.content), pending.ganttCode, delIds(), pending.newIds || []);
+          pending.ganttCode = rec.code;
+          keptGantt = rec.kept || [];
+          var rn = rec.renames || {};
+          Object.keys(rn).forEach(function (oldId) {
+            var newId = rn[oldId];
+            /* id 换了号，与之绑定的所有引用必须一起换：events 键、待传资源队列、记账清单、提交信息 */
+            if (pending.events && pending.events[oldId] !== undefined) {
+              pending.events[newId] = pending.events[oldId];
+              delete pending.events[oldId];
+            }
+            ['sampleUploads', 'stepImgUploads', 'tipsImgUploads', 'attUploads'].forEach(function (q) {
+              (pending[q] || []).forEach(function (u) { if (u && u.id === oldId) u.id = newId; });
+            });
+            ['newIds', 'delIds'].forEach(function (q) {
+              if (pending[q]) pending[q] = pending[q].map(function (x) { return x === oldId ? newId : x; });
+            });
+            if (pending.desc) pending.desc = String(pending.desc).replace(oldId, newId);
+            renamedNote.push(oldId + ' → ' + newId);
           });
-          if (!missing.length) return;
-          var list = missing.join('、');
-          if (opts.silent) {
-            throw new Error('页面数据可能过期（远端多出任务 ' + list + '），已跳过本次自动同步以免误删');
-          }
-          var ok = window.confirm(
-            '检测到远端存在、但本页没有的任务：' + list + '\n\n' +
-            '继续保存会把它们从甘特图上删掉。\n' +
-            '（它们的执行说明不会丢 —— events.js 已改为合并写回，本页没加载到的条目会按原文保留）\n\n' +
-            '· 确实要删除 → 点「确定」\n' +
-            '· 本页数据过期（打开了很久的旧标签页）→ 点「取消」，' +
-            '再按 Ctrl+F5（Mac：⌘+Shift+R）强制刷新后重试');
-          if (!ok) throw new Error('已取消保存：页面数据可能过期，请先强制刷新（Ctrl+F5）再重试');
+          if (renamedNote.length) msg = 'sync: ' + (pending.desc || 'batch update');
+        }).catch(function (err) {
+          console.warn('[gantt] 写回前对账失败，降级为按本页原样写回：', err && err.message ? err.message : err);
         });
       }
 
-      return precheckDrift().then(function () { return uploadAll(); }).then(function (res) {
+      return reconcile().then(function () { return uploadAll(); }).then(function (res) {
         var ops = [];
         var effEvents = pending.events;
         if (res && effEvents) {
@@ -2703,19 +2720,32 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         clearPending();
         syncSaveBtn();
         /* 手动保存（非静默）：写回成功后原地重建渲染（不再整页刷新，避免退出全屏）。
+           v40：用**对账后的** pending.ganttCode 重渲染 —— 它已经含「保留回来的远端条目」，
+           所以本页视图与刚写回的文件立即一致，不需要再靠 location.reload() 取回数据。
            effEvents 为写回后的正式数据（含 sampleUrl 直链）；无 gantt 改动时沿用当前 model 渲染 */
         if (!opts.silent) {
           reloadAfterSave(pending.ganttCode || Admin.serializeGantt(model), effEvents || eventsData);
-          if (mergedKeep.length) {
-            /* 本页数据比远端旧：已保留远端多出的条目，刷新一次把合并后的最新数据取回来，避免后续编辑基于旧数据 */
-            toast('ℹ️ 本页数据较旧：已保留远端新增的 ' + mergedKeep.join('、') + ' 条执行说明（未丢失），正在刷新…');
-            setTimeout(function () { location.reload(); }, 1500);
+          var notes = [];
+          if (renamedNote.length) notes.push('新条目原 id 已被远端占用，已改用 ' + renamedNote.join('、'));
+          if (keptGantt.length) notes.push('保留远端多出的任务 ' + keptGantt.join('、'));
+          if (mergedKeep.length) notes.push('保留远端新增的执行说明 ' + mergedKeep.join('、'));
+          if (notes.length) {
+            toast('ℹ️ 已保存；' + notes.join('；') + '（均未丢失）');
+            /* events.js 的保留条目只存在于远端文件里，本页 eventsData 拿不到 → 刷新一次取回，
+               否则点这些任务会看不到执行说明。gantt 侧的保留条目已在上面的 reloadAfterSave 里生效。 */
+            if (mergedKeep.length) setTimeout(function () { location.reload(); }, 1500);
           } else {
             toast('✅ 已保存同步到 GitHub（含 deadlines.json 重建），全班刷新即见。');
           }
+        } else if (renamedNote.length || keptGantt.length) {
+          /* 静默路径（表单提交触发的立即同步 / 定时自动同步）本来刻意不重渲染，
+             但对账一旦发生（换过 id / 保留回了远端条目），本页 model 就与刚写回的文件不一致：
+             不更新的话，用户接着编辑这条会**再次撞车**（每编辑一次 id 就换一次），
+             也看不到刚保留回来的远端任务。所以只在这两种「本页数据确实比远端旧」的情形补一次重渲染。 */
+          reloadAfterSave(pending.ganttCode, effEvents || eventsData);
         }
         /* v33：把结果回传给调用方（handleSubmit / doDelete 的立即同步要用它决定提示什么） */
-        return { saved: true, kept: mergedKeep };
+        return { saved: true, kept: mergedKeep, keptGantt: keptGantt, renamed: renamedNote };
       }).catch(function (err) {
         if (saveBtn) saveBtn.disabled = false;
         syncSaveBtn();
@@ -3150,6 +3180,9 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         ganttCode: Admin.serializeGantt(newModel),
         events: needEvents ? newEvents : undefined,
         delIds: delIdsNow,
+        /* v40：新建条目记账 —— 写回对账时若发现这个 id 已被远端占用（页面数据过期，
+           genId 只扫本页 model 才会撞车），就换一个未占用的 id，避免覆盖远端同 id 的条目 */
+        newIds: isNew ? [id] : [],
         desc: msg
       };
       var sampleUrlVal = newEvent ? newEvent.sampleUrl : null;
@@ -3197,9 +3230,14 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         /* silent：写回成功后不再 reloadAfterSave（上面已做）；autoTriggered 让失败一定出声 */
         saveAll({ silent: true, autoTriggered: true }).then(function (r) {
           if (r && r.saved) {
-            toast((r.kept && r.kept.length)
-              ? '✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」并同步；保留远端新增的 ' + r.kept.join('、') + ' 条执行说明（未丢失）'
-              : '✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」并同步到 GitHub，全班刷新即见。');
+            /* v40：本页数据比远端旧时，合并写回会保留远端多出的条目，甚至给本次新建的条目换 id ——
+               这些都必须出声告知，否则用户会以为「我这条的 id 变了/图上多出来的东西哪来的」 */
+            var extra = [];
+            if (r.renamed && r.renamed.length) extra.push('新条目原 id 已被远端占用，已改用 ' + r.renamed.join('、'));
+            if (r.keptGantt && r.keptGantt.length) extra.push('保留远端多出的任务 ' + r.keptGantt.join('、'));
+            if (r.kept && r.kept.length) extra.push('保留远端新增的执行说明 ' + r.kept.join('、'));
+            toast('✅ 已' + (isNew ? '新增' : '更新') + '「' + name + '」并同步到 GitHub' +
+              (extra.length ? '；' + extra.join('；') + '（未丢失）' : '，全班刷新即见。'));
           }
           /* 失败分支已在 saveAll 内部 toast，这里不重复 */
         });
@@ -3244,9 +3282,11 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       if (G.GanttAdmin && G.GanttAdmin.isLoggedIn && G.GanttAdmin.isLoggedIn()) {
         saveAll({ silent: true, autoTriggered: true }).then(function (r) {
           if (r && r.saved) {
-            toast((r.kept && r.kept.length)
-              ? '✅ 已删除「' + task.name + '」并同步；保留远端新增的 ' + r.kept.join('、') + ' 条执行说明（未丢失）'
-              : '✅ 已删除「' + task.name + '」并同步到 GitHub，全班刷新即见。');
+            var extra = [];
+            if (r.keptGantt && r.keptGantt.length) extra.push('保留远端多出的任务 ' + r.keptGantt.join('、'));
+            if (r.kept && r.kept.length) extra.push('保留远端新增的执行说明 ' + r.kept.join('、'));
+            toast('✅ 已删除「' + task.name + '」并同步到 GitHub' +
+              (extra.length ? '；' + extra.join('；') + '（未丢失）' : '，全班刷新即见。'));
           }
         });
       } else {

@@ -972,8 +972,96 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
       const t = document.querySelector('.gv-toast');
       return t ? t.textContent : '';
     });
-    check(/保留远端新增的 ?b7/.test(toastTxt), '页面明确告知「已保留远端新增的 b7」（实际「' + toastTxt + '」）');
+    check(/保留远端新增的执行说明 ?b7/.test(toastTxt), '页面明确告知「保留远端新增的执行说明 b7」（实际「' + toastTxt + '」）');
     await p2.close();
+  }
+
+  console.log('[11b] gantt.md 合并写回 + 新增条目 id 对账（回归 2026-10-09 m19「团推优会议」被覆盖事故）');
+  /* 事故复盘（线上提交为证）：
+       38d2865  sync: add: m19 团推优会议
+       ef18082  sync: add: m19 交积极分子材料      ← 把上一条整行替换掉了
+     成因：genId 只扫本页 model → 页面数据过期（远端已有 m19、本页没有）时，新条目又被分配 m19；
+     gantt.md 当时是**整块替换**，而旧护栏 precheckDrift 只比对「id 集合」——
+     撞车后两边集合完全一致 → 判为「无漂移」→ 一句提示都没有，远端的「团推优会议」被静默覆盖，
+     前端照常弹「已同步」，用户刷新后才发现「我加的时间点没了」。
+     这里把当时的形状原样搭出来，且**不依赖线上恰好存在某个 id**：
+       ① 页面拿「当前 gantt.md」当过期快照；
+       ② GitHub API 替身返回的远端文件里，多出一条 id = 「本页下一个会生成的 m 序号」的占位条目
+          —— 这正好等价于「页面打开之后，别人在远端写了一条同 id 的条目」；
+       ③ 在该页面新增一个时间点，断言：远端那条原文还在、本页新条目被换号、页面明确告知换号。 */
+  {
+    /* 本页 genId 会生成什么 id：按当前 gantt.md 里最大的 m 序号 + 1 推导（与 viewer 的 genId 同口径） */
+    const localMermaid = (function () {
+      const m = /```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(ganttSrcFull);
+      return m ? m[1] : '';
+    })();
+    const maxM = Parser.parse(localMermaid).all.reduce((mx, t) => {
+      const m = /^m(\d+)$/.exec(t.id || '');
+      return m ? Math.max(mx, +m[1]) : mx;
+    }, 0);
+    const clashId = 'm' + (maxM + 1);          /* 本页将要生成的 id（会与远端撞车） */
+    const freeId = 'm' + (maxM + 2);           /* 对账后应换成的 id */
+    const remoteLine = '    远端占位条目 :milestone, ' + clashId + ', 2026-10-12 20:00, 2026-10-12 20:00';
+    /* 远端文件 = 当前 gantt.md + 一条占位条目（挂在最后一个 section 里，即 mermaid 块末行之前） */
+    const fenceAt = ganttSrcFull.lastIndexOf('```');
+    const remoteGantt = ganttSrcFull.slice(0, fenceAt) + remoteLine + '\n' + ganttSrcFull.slice(fenceAt);
+    check(remoteGantt.indexOf(remoteLine) > 0, '现场：远端文件已注入占位条目（' + remoteLine.trim() + '）');
+
+    const p3 = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const dialogs3 = [];
+    p3.on('dialog', d => { dialogs3.push(d.type()); d.accept(); });
+    /* ① 页面脚本：给「不含占位条目」的 gantt.md（= 过期快照） */
+    await p3.route('**/gantt.md*', route => route.fulfill({
+      status: 200, contentType: 'text/plain; charset=utf-8', body: ganttSrcFull
+    }));
+    /* ② GitHub API 替身：GET 给远端（含占位条目），PUT 记录下来并假装成功 */
+    const puts3 = [];
+    await p3.route('**/*api.github.com/**', route => {
+      const req = route.request(), url = req.url();
+      if (req.method() === 'PUT') {
+        puts3.push({ url: url, body: JSON.parse(req.postData() || '{}') });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: { sha: 'new' }, commit: { sha: 'c1' } }) });
+      }
+      const isEvents = /events\.js/.test(decodeURIComponent(url));
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          content: Buffer.from(isEvents ? eventsSrcFull : remoteGantt, 'utf8').toString('base64'),
+          encoding: 'base64', sha: isEvents ? 'sha-ev' : 'sha-gantt'
+        })
+      });
+    });
+    await p3.addInitScript(() => { try { localStorage.setItem('gantt_admin_token', 'ui-test-only'); } catch (e) {} });
+    await p3.goto(URL_, { waitUntil: 'load' });
+    await p3.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
+    const scene = await p3.evaluate(() => window.__ganttViewer.debugTasks());
+    check(scene.every(t => t.name !== '远端占位条目'),
+      '场景就位：过期快照已生效（本页看不到远端的「远端占位条目」，本页最大 m 序号 = ' + maxM + '）');
+    /* 新增一个时间点：genId 会算出 clashId（与远端撞车） */
+    await p3.click('[data-act="add"]');
+    await p3.waitForSelector('#gv-crudform', { timeout: 5000 });
+    await p3.fill('#gv-crudform [name=name]', 'E2E 对账样本');
+    await p3.fill('#gv-crudform [name=start]', '2026-10-13');
+    await p3.click('#gv-crudsave');
+    for (let i = 0; i < 40 && !puts3.some(x => /gantt\.md/.test(decodeURIComponent(x.url))); i++) {
+      await p3.waitForTimeout(150);
+    }
+    const gPut3 = puts3.filter(x => /gantt\.md/.test(decodeURIComponent(x.url)))[0];
+    check(!!gPut3, '保存真的写回了 gantt.md（拦截到 PUT ' + puts3.length + ' 次）');
+    const written3 = gPut3 ? Buffer.from(gPut3.body.content || '', 'base64').toString('utf8') : '';
+    check(written3.indexOf(remoteLine.trim()) > 0,
+      '★ 远端「远端占位条目」（' + clashId + '）被**逐字保留** —— 这正是 10-09 被覆盖掉的那一条');
+    check(/^ {4}E2E 对账样本 :milestone, m\d+,/m.test(written3), '本页新增的条目照常写出');
+    const newId = (written3.match(/^ {4}E2E 对账样本 :milestone, ([\w]+),/m) || [])[1] || '';
+    check(newId === freeId,
+      '★ 新条目被换成未占用的 id（' + clashId + ' → ' + newId + '，期望 ' + freeId + '），不再与远端撞车');
+    check((written3.match(new RegExp(clashId + ',', 'g')) || []).length === 1,
+      '写回内容里 ' + clashId + ' 只出现一次（不会出现两条同 id）');
+    check(dialogs3.length === 0, '全程没有弹任何确认框（旧版这里会弹「点确定就把远端条目删掉」）');
+    const toast3 = await p3.evaluate(() => { const t = document.querySelector('.gv-toast'); return t ? t.textContent : ''; });
+    check(toast3.indexOf(clashId + ' → ' + newId) >= 0 && toast3.indexOf('保留远端多出的任务 ' + clashId) >= 0,
+      '页面明确告知「换号 + 保留了远端那条」（实际「' + toast3 + '」）');
+    await p3.close();
   }
 
   console.log('[12] 截图存档');
