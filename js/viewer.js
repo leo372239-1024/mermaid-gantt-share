@@ -3092,6 +3092,16 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
         crudBtn.disabled = false;
         crudBtn.textContent = '✓ 保存';
       }
+      /* v42：**不允许在页面数据缺失时保存**。
+         事故背景：2026-10-10 13:02 一条空内容写入把数据库里的 gantt.md 清空了
+         （页面渲染与提醒同时失效）。根因是提交路径在「本页 model 没数据」时仍照常
+         序列化并写回，而空 model 序列化出来就是空文件。这里在入口处直接拦住：
+         宁可让用户重试一次，也绝不写坏唯一的数据源。 */
+      if (!model || !model.range || !(model.all && model.all.length)) {
+        restoreCrudBtn();
+        showFormErr(form, '页面数据还没加载完整，无法保存。请刷新页面（F5）后重试。');
+        return;
+      }
       var fd = new FormData(form);
       var name = String(fd.get('name') || '').trim();
       var completed = String(fd.get('completed') || 'undone');
@@ -3292,6 +3302,11 @@ mark.gv-hl{background:#fde68a;color:#78350f;border-radius:3px;padding:0 1px}
       drawer.querySelector('.gv-delconfirm').addEventListener('click', function () { doDelete(task); });
     }
     function doDelete(task) {
+      /* v42：同 handleSubmit —— 页面数据缺失时不许写库，避免把数据源写坏 */
+      if (!model || !model.range || !(model.all && model.all.length)) {
+        toast('⚠️ 页面数据还没加载完整，无法删除。请刷新页面（F5）后重试。');
+        return;
+      }
       var ev = eventsData[task.id] || null;
       var newModel = {
         title: model.title,

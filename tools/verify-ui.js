@@ -540,9 +540,12 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
     check(/今天没有截止的待办/.test(emptyTxt),
       '今天无截止条目 → 面板给出空态文案：「' + emptyTxt.replace(/\s+/g, ' ') + '」');
   }
-  /* v33 新增断言：面板副标题必须明示新口径（避免旧文案残留让同学误解筛选规则） */
+  /* v33 新增断言：面板副标题必须明示新口径（避免旧文案残留让同学误解筛选规则）
+     注意：有截止条目时副标题是「今天截止的待办 N 项」；空态时是「今天没有截止的待办」——
+     后者不含连续的「今天截止」四字，所以这里放宽为「今天」+「截止」同时出现即可。 */
   const remSub = await page.$eval('.gv-rem-panel', e => e.textContent.replace(/\s+/g, ' ')).catch(() => '');
-  check(/今天截止/.test(remSub), '提醒面板文案明示「今天截止」口径（' + remSub.slice(0, 120) + '…）');
+  check(/今天/.test(remSub) && /截止/.test(remSub),
+    '提醒面板文案明示「今天截止」口径（' + remSub.slice(0, 120) + '…）');
   check(!/不足一天|24 ?小时/.test(remSub), '提醒面板已不含「不足一天 / 24 小时」旧口径文案');
   const btns = await page.$$eval('.gv-rem-btn', els => els.map(e => e.textContent.trim()));
   check(btns.length === 4, '系统级通道 4 个按钮（实际 ' + btns.length + '）');
@@ -1116,7 +1119,15 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
       const before = await apiGet('gantt.md', tk);
       const p4 = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage();
       try {
-        await p4.addInitScript(t => { try { localStorage.setItem('gantt_admin_token', t); } catch (e) {} }, tk);
+        /* 注入有效令牌。注意：addInitScript 在**每次导航**都会重跑 ——
+           第 7 步要测「失效令牌 → 401」时必须先让本脚本自我禁用，
+           否则 reload 时有效令牌会被重新写回，401 永远测不到（旧版的假红就是这个原因）。 */
+        await p4.addInitScript(t => {
+          try {
+            if (localStorage.getItem('__e2e_skip_token_seed') === '1') return;
+            localStorage.setItem('gantt_admin_token', t);
+          } catch (e) {}
+        }, tk);
         await p4.goto(URL_, { waitUntil: 'load' });
         await p4.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
         await p4.waitForTimeout(600);
@@ -1162,6 +1173,36 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
         await p4.waitForTimeout(2500);
         const after2 = await apiGet('gantt.md', tk);
         check(after2.text.indexOf(SAMPLE) < 0, '★ 删除同样即写库：后端 gantt.md 已不含该条目');
+
+        /* 7) v42：令牌失效（401）必须自动清令牌 + 唤起登录框，而不是只丢一个报错让人干等
+           先关掉 init script 的令牌注入（否则 reload 会把有效令牌写回来，见上面 addInitScript 注释） */
+        await p4.evaluate(() => {
+          localStorage.setItem('__e2e_skip_token_seed', '1');
+          localStorage.setItem('gantt_admin_token', '1790000000000.invalidsignature');
+        });
+        await p4.reload({ waitUntil: 'load' });
+        await p4.waitForSelector('#gv-svg .gv-bar', { timeout: 15000 });
+        await p4.waitForTimeout(500);
+        await p4.click('[data-act="add"]');
+        await p4.waitForSelector('#gv-crudform', { timeout: 5000 });
+        await p4.fill('#gv-crudform [name=name]', 'E2E 过期令牌样本');
+        await p4.fill('#gv-crudform [name=start]', '2026-12-05');
+        await p4.click('#gv-crudsave');
+        await p4.waitForSelector('#adminModal.on', { timeout: 8000 }).catch(() => {});
+        const modalOn = await p4.evaluate(() => {
+          const m = document.getElementById('adminModal');
+          return !!m && m.classList.contains('on');
+        });
+        check(modalOn, '★ 令牌失效时自动弹出登录框（而不是只报「未登录或登录已过期」）');
+        const tokenGone = await p4.evaluate(() => !localStorage.getItem('gantt_admin_token'));
+        check(tokenGone, '失效令牌已被清除（按钮回到未登录态，不会再反复报同一个错）');
+        const errTxt = await p4.evaluate(() => {
+          const e = document.getElementById('adminErr');
+          return (e && e.style.display !== 'none') ? e.textContent : '';
+        });
+        check(errTxt.indexOf('登录已过期') >= 0, '登录框里给出准确原因（实际「' + errTxt + '」）');
+        check((await apiGet('gantt.md', tk)).text.indexOf('E2E 过期令牌样本') < 0,
+          '未授权的那次写入没有落到后端（401 被正确拦截）');
       } finally {
         await p4.close().catch(() => {});
         /* 兜底：无论走到哪一步，都把 gantt.md 还原为自检前的原文，保证零残留

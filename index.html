@@ -316,7 +316,7 @@
   }
   bindViewToggle();
 
-  // ============ 管理员登录（GitHub API 线上直写） ============
+  // ============ 管理员登录（本机服务口令 → 令牌） ============
   (function adminPanel() {
     const Admin = window.GanttAdmin;
     if (!Admin) { document.getElementById('adminBtn').style.display = 'none'; return; }
@@ -330,6 +330,7 @@
     const logoutBtn = document.getElementById('adminLogout');
     const errEl = document.getElementById('adminErr');
     const okEl = document.getElementById('adminOk');
+    let sessionExpired = false;   /* 因令牌过期而自动唤起登录（用于给出不同文案） */
 
     function refreshState() {
       const logged = Admin.isLoggedIn();
@@ -348,6 +349,22 @@
     }
     function close() { modal.classList.remove('on'); }
 
+    /* v42：令牌被服务端拒绝（401）时由 admin.js 回调到这里。
+       场景：令牌 12 小时到期，或管理员口令被改过（换口令会让所有旧令牌立即失效）。
+       处理：清掉本地令牌（admin.js 已做）→ 刷新按钮态 → 弹出登录框并给出准确说明。
+       不自动重载页面：用户输一次口令即可继续，省掉「刷新→找登录入口→再操作」的往返。 */
+    Admin.setAuthExpiredHandler(function () {
+      sessionExpired = true;
+      refreshState();          /* 此时 isLoggedIn() 已为 false，按钮回到「🔒 管理员」 */
+      okEl.style.display = 'none';
+      errEl.textContent = '登录已过期（令牌有效期 12 小时；管理员口令变更也会使旧令牌失效）。请重新输入口令。';
+      errEl.style.display = 'block';
+      modal.classList.add('on');
+      tokenInput.disabled = false;
+      tokenInput.value = '';
+      tokenInput.focus();
+    });
+
     btn.addEventListener('click', open);
     mask.addEventListener('click', close);
     closeBtn.addEventListener('click', close);
@@ -359,7 +376,10 @@
       Admin.validateToken(token).then(function (issued) {
         /* 存的是服务端签发的令牌（不是用户输入的口令本身） */
         Admin.setToken(issued || token);
-        okEl.textContent = '✅ 验证成功，已登录。刷新页面后即可在详情弹窗中增删改查。';
+        okEl.textContent = sessionExpired
+          ? '✅ 已重新登录，可以继续编辑与保存了。'
+          : '✅ 验证成功，已登录。刷新页面后即可在详情弹窗中增删改查。';
+        sessionExpired = false;
         okEl.style.display = 'block'; errEl.style.display = 'none';
         setTimeout(function () { location.href = location.pathname + '?v=' + Date.now(); }, 600);
       }).catch(function (e) {

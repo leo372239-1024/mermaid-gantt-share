@@ -481,6 +481,20 @@
   }
   function isLoggedIn() { return !!getToken(); }
 
+  /* 令牌被服务端拒绝（401）时的回调。
+     为什么要它：令牌有 12 小时有效期，且**换管理员口令会让所有已发出的令牌立即失效**
+     （签名密钥由口令派生）。没有这个出口时，用户只会看到一个「未登录或登录已过期」的报错，
+     不知道该重新登录 —— 页面看起来还是登录态，工具条上还有「＋ 新增」。
+     绑定的动作是「清掉本地令牌 + 提示并唤起登录弹窗」，见 index.html 的 onAuthExpired。 */
+  var authExpiredHandler = null;
+  function setAuthExpiredHandler(fn) { authExpiredHandler = (typeof fn === 'function') ? fn : null; }
+  function notifyAuthExpired() {
+    try { clearToken(); } catch (e) {}
+    try { if (authExpiredHandler) authExpiredHandler(); } catch (e) {}
+  }
+  /* 统一的 401 识别：本服务的兼容层用标准 HTTP 语义表达「没带令牌 / 令牌过期」 */
+  function isAuthError(res) { return !!res && res.status === 401; }
+
   /* ---------- UTF-8 ↔ Base64 ---------- */
   function utf8ToB64(str) {
     var bytes = new TextEncoder().encode(str);
@@ -503,10 +517,11 @@
     return h;
   }
 
-  /* 读文件：返回 { content: 解码后的文本, sha }（加时间戳 cache-busting，绕过 GitHub CDN 缓存避免拿到过期 sha） */
+  /* 读文件：返回 { content: 解码后的文本, sha }（加时间戳 cache-busting，绕过 CDN 缓存避免拿到过期 sha） */
   function getFile(path) {
     return fetch(API_BASE + path + '?ref=' + REPO.branch + '&_=' + Date.now(), { headers: authHeaders(), cache: 'no-store' })
       .then(function (res) {
+        if (isAuthError(res)) { notifyAuthExpired(); throw new Error('登录已过期，请重新登录'); }
         if (!res.ok) return res.json().then(function (j) { throw new Error('读取 ' + path + ' 失败：' + (j.message || res.status)); });
         return res.json();
       })
@@ -528,6 +543,7 @@
       headers: Object.assign(authHeaders(), { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body)
     }).then(function (res) {
+      if (isAuthError(res)) { notifyAuthExpired(); throw new Error('登录已过期，请重新登录'); }
       if (!res.ok) return res.json().then(function (j) { throw new Error('写入 ' + path + ' 失败：' + (j.message || res.status)); });
       return res.json();
     });
@@ -549,6 +565,7 @@
         branch: REPO.branch
       })
     }).then(function (res) {
+      if (isAuthError(res)) { notifyAuthExpired(); throw new Error('登录已过期，请重新登录'); }
       if (!res.ok) return res.json().then(function (j) { throw new Error('上传资源失败：' + (j.message || res.status)); });
       return rawUrl(p);
     });
@@ -635,6 +652,8 @@
     setToken: setToken,
     clearToken: clearToken,
     isLoggedIn: isLoggedIn,
+    /* v42：401 自动重登支持 —— 调用方注册回调，令牌被拒时自动清本地令牌并唤起登录 */
+    setAuthExpiredHandler: setAuthExpiredHandler,
     validateToken: validateToken,
     getFile: getFile,
     putFile: putFile,

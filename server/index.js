@@ -21,6 +21,7 @@ const db = require('./db');
 const auth = require('./auth');
 const gh = require('./gh-api');
 const deadlines = require('./deadlines');
+const { normalizeRepoPath } = require('./repo-path');
 const { mimeOf } = require('./mime');
 
 const PORT = Number(process.env.PORT || 18080);
@@ -185,7 +186,10 @@ const server = http.createServer(async function (req, res) {
     /* --- GitHub Contents API 兼容层 --- */
     const m = /^\/api\/gh\/repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/.exec(pathname);
     if (m) {
-      const filePath = m[3];
+      const filePath = normalizeRepoPath(m[3]);
+      if (!filePath) {
+        return sendJson(res, 400, { message: '路径不合法：不能为空、不能含 .. 或反斜杠' });
+      }
 
       if (method === 'GET') {
         const doc = await gh.read(filePath);
@@ -201,7 +205,8 @@ const server = http.createServer(async function (req, res) {
         try { payload = JSON.parse(await readBody(req, 64 * 1024 * 1024)); }
         catch (e) { return sendJson(res, 400, { message: '请求体不是合法 JSON' }); }
 
-        const r = await gh.write(filePath, payload.content, payload.sha, payload.message);
+        const r = await gh.write(filePath, payload.content, payload.sha, payload.message,
+          { allowEmpty: !!payload.allowEmpty });
         /* 写完即让 deadlines 缓存失效，保证「改完立刻看到新提醒」 */
         dlCache = { at: 0, data: null };
         return sendJson(res, 200, {
@@ -255,6 +260,11 @@ const server = http.createServer(async function (req, res) {
   } catch (e) {
     if (e && e.code === 'SHA_MISMATCH') {
       return sendJson(res, 409, { message: e.message });
+    }
+    /* 内容安全校验不通过（空写入 / 破坏 gantt.md 结构 / events.js 语法坏）→ 422，
+       让前端把这条可操作的说明原样弹给用户，而不是静默写坏数据源 */
+    if (e && e.code === 'CONTENT_REJECTED') {
+      return sendJson(res, 422, { message: e.message });
     }
     console.error('[http] ' + method + ' ' + pathname + ' 出错：', e);
     return sendJson(res, 500, { message: String((e && e.message) || e) });

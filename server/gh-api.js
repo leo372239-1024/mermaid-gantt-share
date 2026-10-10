@@ -15,6 +15,8 @@
  */
 
 const db = require('./db');
+/* 写入内容安全校验（纯函数，宿主机单测直接 require 同一份规则） */
+const { validateWrite } = require('./validate-write');
 
 function isAssetPath(p) {
   return /^(samples|files)\//.test(String(p || ''));
@@ -56,18 +58,30 @@ async function read(pathStr) {
 }
 
 /* 写：content 是 base64（与 GitHub API 一致），sha 可选（乐观并发校验） */
-async function write(pathStr, base64Content, sha, message) {
+async function write(pathStr, base64Content, sha, message, opts) {
   const buf = Buffer.from(String(base64Content || ''), 'base64');
   if (isAssetPath(pathStr)) {
     const r = await db.putAsset(pathStr, buf, null, message);
     return { path: pathStr, sha: r.sha, size: r.size };
   }
-  const r = await db.putFile(pathStr, buf.toString('utf8'), sha, message);
+  const text = buf.toString('utf8');
+  const allowEmpty = !!(opts && opts.allowEmpty);
+  if (!allowEmpty) {
+    const prev = await db.getFile(pathStr);
+    const v = validateWrite(pathStr, text, prev ? prev.content : '');
+    if (!v.ok) {
+      const err = new Error(v.reason);
+      err.code = 'CONTENT_REJECTED';
+      throw err;
+    }
+  }
+  const r = await db.putFile(pathStr, text, sha, message);
   return { path: pathStr, sha: r.sha, size: r.size };
 }
 
 module.exports = {
   isAssetPath: isAssetPath,
+  validateWrite: validateWrite,
   read: read,
   write: write
 };

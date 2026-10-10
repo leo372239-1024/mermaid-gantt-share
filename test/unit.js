@@ -291,8 +291,16 @@ check(dj.schema === 5, 'schema 升到 5（口径变更必须版本化，避免�
 check(dj.within24h === undefined, '已移除旧的 within24h 字段（旧口径不再对外暴露）');
 check(dj.within24hText === undefined, '已移除旧的 within24hText 字段');
 check(typeof dj.dueTodayCount === 'number', '新增 dueTodayCount 计数（当前 ' + dj.dueTodayCount + '）');
-check(typeof dj.dueTodayText === 'string' && dj.dueTodayText.length > 0,
-  '新增 dueTodayText 文案（「' + dj.dueTodayText + '」）');
+/* 文案字段的**类型**必须恒成立；内容是否为空取决于「今天是否真有截止项」——
+   10.10（周六）恰好没有课，dueTodayCount=0 → 文案本应为空串。
+   原来断言 length>0 会在「今天无待办」的日子永久假红（数据特性，不是回归），
+   故改为「类型正确 + 有内容时与计数一致」这一更强且恒真的表述。 */
+check(typeof dj.dueTodayText === 'string', '新增 dueTodayText 字段且类型为字符串');
+check(dj.dueTodayCount === 0
+  ? dj.dueTodayText === ''
+  : dj.dueTodayText.split('\n').length === dj.dueTodayCount,
+  'dueTodayText 与 dueTodayCount 一致（' + dj.dueTodayCount + ' 条' +
+  (dj.dueTodayCount ? '：「' + dj.dueTodayText.slice(0, 60).split('\n')[0] + '…」' : '，今天无截止项 → 空串') + '）');
 /* 每条 item 都必须带 dueToday 布尔位（网页端 remDueToday 与构建端同口径的前提） */
 check(dj.items.every(i => typeof i.dueToday === 'boolean'),
   '所有 items 均带 dueToday 布尔位（' + dj.items.length + ' 条）');
@@ -855,6 +863,108 @@ check(mgReal.kept.length === model.all.length - half.length,
 const mgRealIds = Object.keys(Admin.taskIdsIn(mgReal.code));
 check(mgRealIds.length === model.all.length,
   '15f.3 真实数据：合并产物覆盖全部 ' + model.all.length + ' 条 id（无重复、无缺失）');
+
+/* ------------------------------------------------------------------
+   [16] v42 写入安全校验（回归 2026-10-10 13:02 gantt.md 被空写入清空事故）
+   事故：服务端 putFile 对内容零校验 → 一条 0 字符写入把唯一数据源清空，
+   页面渲染空白、/deadlines.json 报 500「未找到 ```mermaid 代码块」、提醒整块失效。
+   下面把校验规则的每一档钉死（纯函数，直接 require server/gh-api.js，不连数据库）。
+   ------------------------------------------------------------------ */
+console.log('[16] v42 写入安全校验（空写入 / 结构破坏拦截）');
+/* 直接 require 纯函数模块：宿主机没装 pg，走 gh-api.js → db.js 那条链会 MODULE_NOT_FOUND */
+const V = require(path.join(ROOT, 'server', 'validate-write.js')).validateWrite;
+
+/* 注意：realGanttMermaid 是**代码块内部**的内容（不含 ``` 围栏）。
+   真实的 gantt.md 是「说明文字 + ```mermaid 围栏 + 内容 + ``` 围栏」的完整文档，
+   所以下面凡涉及围栏的用例都用 realGanttDoc（完整文档），与线上写入的形态一致。 */
+const realGanttDoc = '```mermaid\n' + realGanttMermaid + '\n```\n';
+
+/* 16a. 空写入：本来就是这场事故的直接形态 */
+const vEmpty = V('gantt.md', '', realGanttDoc);
+check(!vEmpty.ok && /拒绝写入空内容/.test(vEmpty.reason),
+  '16a.1 ★ 把有内容的 gantt.md 写空 → 拒绝（正是事故里的那次写入）');
+const vEmpty2 = V('js/events.js', '   \n  ', 'module.exports = { a: 1 };');
+check(!vEmpty2.ok, '16a.2 纯空白内容同样拒绝（不是只判 length===0）');
+
+/* 16b. 缩水 >90%：比清空更隐蔽，破坏力一样 */
+const vShrink = V('gantt.md', '```mermaid\ngantt\n```\n', realGanttDoc);
+check(!vShrink.ok && /骤减/.test(vShrink.reason),
+  '16b.1 ★ 内容缩水超过 90% → 拒绝（' + realGanttDoc.length + ' → 20 字符）');
+
+/* 16c. gantt.md 必须有 mermaid 围栏，且围栏必须配平 */
+const vNoFence = V('gantt.md', 'gantt\n    dateFormat YYYY-MM-DD\n' + 'x'.repeat(realGanttDoc.length), realGanttDoc);
+check(!vNoFence.ok && /mermaid/.test(vNoFence.reason),
+  '16c.1 ★ 丢失 ```mermaid 围栏 → 拒绝（这正是事故后 /deadlines.json 报的错）');
+/* 只剩一个开围栏、没有闭合围栏（计数为奇数）→ 结构损坏 */
+const vOddFence = V('gantt.md', realGanttDoc.replace(/\n```\n$/, '\n'), realGanttDoc);
+check(!vOddFence.ok && /不配平/.test(vOddFence.reason), '16c.2 围栏不配平 → 拒绝');
+/* 顺带钉住：完整文档形态**必须**放行（否则护栏会挡住正常保存） */
+check(V('gantt.md', realGanttDoc, realGanttMermaid + '\n旧版').ok,
+  '16c.3 正常的完整 gantt.md 文档 → 放行');
+
+/* 16d. js/events.js 的语法校验（写坏会让提醒链路整体 500） */
+const vBadJs = V('js/events.js', 'module.exports = { a: 1 \n', 'module.exports = { a: 1 };');
+check(!vBadJs.ok && /语法错误/.test(vBadJs.reason), '16d.1 ★ events.js 语法坏 → 拒绝');
+const vGoodJs = V('js/events.js', 'module.exports = { a: 1 };\n', 'module.exports = { a: 2 };');
+check(vGoodJs.ok, '16d.2 合法 events.js 正常放行');
+
+/* 16e. 不能误伤：正常写入必须一律放行（护栏的意义是挡异常，不是挡人） */
+const docOneMore = realGanttDoc.replace('\n```\n', '\n    section 新增事项\n    测试条目 :milestone, zz1, 2026-12-01, 0d\n```\n');
+check(V('gantt.md', docOneMore, realGanttDoc).ok, '16e.1 正常新增条目 → 放行（不误伤日常写入）');
+const docOneLess = realGanttDoc.replace(/^ {4}.*\r?\n/m, '');
+check(V('gantt.md', docOneLess, realGanttDoc).ok,
+  '16e.2 正常删掉一条 → 放行（小幅删减不该被当成异常）');
+check(V('gantt.md', '```mermaid\ngantt\n    dateFormat YYYY-MM-DD\n```\n', '').ok,
+  '16e.3 首次创建（原本不存在、内容很短）→ 放行');
+check(V('js/events.js', 'module.exports = {};\n', '').ok, '16e.4 首次创建空 events 模块 → 放行');
+
+/* 16f. 唯一「确实要清空」的通道是显式 allowEmpty（在 gh-api.write 里生效），
+   校验函数本身对空内容一律拒绝 —— 把这一点也钉住，避免有人日后把它改成「空就放过」 */
+check(!V('gantt.md', '', realGanttMermaid).ok && !V('js/events.js', '', 'x=1').ok,
+  '16f.1 校验函数对空写入一律拒绝（allowEmpty 是 gh-api 层的显式旁路，不在纯函数里开口子）');
+
+/* ------------------------------------------------------------------
+   [17] v42 仓库路径归一化（回归 2026-10-10 排查中发现的「影子文件」）
+   现象：客户端把 base 与文件名各自带斜杠拼成 .../contents//gantt.md，
+   服务端捕获到 '/gantt.md' —— 与 'gantt.md' 成了数据库里两条独立记录。
+   于是出现了「保存提示成功、刷新却没变」这种最难查的假象，
+   还留下 2 条 files + 4 条 revisions 脏数据要手工清理。
+   ------------------------------------------------------------------ */
+console.log('[17] v42 仓库路径归一化（前导斜杠 / 重复斜杠 / 穿越）');
+const NP = require(path.join(ROOT, 'server', 'repo-path.js')).normalizeRepoPath;
+
+/* 17a. 事故的直接形态：前导斜杠必须被吃掉 */
+check(NP('/gantt.md') === 'gantt.md', '17a.1 ★ "/gantt.md" → "gantt.md"（事故里的那条脏路径）');
+check(NP('//gantt.md') === 'gantt.md', '17a.2 多个前导斜杠同样收敛');
+check(NP('/js/events.js') === 'js/events.js', '17a.3 带目录的前导斜杠 → "js/events.js"');
+
+/* 17b. 重复斜杠 / 结尾斜杠 / 反斜杠 */
+check(NP('js//events.js') === 'js/events.js', '17b.1 中间重复斜杠 → 折叠');
+check(NP('gantt.md/') === 'gantt.md', '17b.2 结尾斜杠 → 去掉');
+check(NP('js\\events.js') === 'js/events.js', '17b.3 Windows 风格反斜杠 → 当分隔符');
+
+/* 17c. 正常路径必须原样通过（归一化不能改写合法路径） */
+['gantt.md', 'js/events.js', 'assets/img/a.png', 'docs/深/层/文件.md'].forEach(function (p) {
+  check(NP(p) === p, '17c.1 合法路径原样通过：' + p);
+});
+
+/* 17d. 非法路径一律返回空串（由调用方转 400，绝不落库） */
+check(NP('') === '', '17d.1 空路径 → 空串');
+check(NP('/') === '', '17d.2 纯斜杠 → 空串');
+check(NP('///') === '', '17d.3 多个纯斜杠 → 空串');
+check(NP('..') === '' && NP('../etc/passwd') === '', '17d.4 ★ 上级目录穿越 → 拒绝');
+check(NP('a/../../b') === '', '17d.5 中间穿越 → 拒绝');
+check(NP('./gantt.md') === 'gantt.md', '17d.6 当前目录段被吃掉（"./gantt.md" ≡ "gantt.md"，不按非法处理）');
+check(NP('a/./b') === 'a/b', '17d.7 夹在中间的 "." 段同样被吃掉（与 shell 语义一致）');
+check(NP('.') === '' && NP('./') === '', '17d.7b 全是 "." 段 → 归一化后为空 → 拒绝');
+check(NP('gantt\u0000.md') === '', '17d.8 NUL 字符 → 拒绝');
+check(NP(null) === '' && NP(undefined) === '', '17d.9 null/undefined → 空串（不抛异常）');
+
+/* 17e. 关键不变量：归一化是幂等的 —— 否则「写进去的」和「读出来的」还会分叉 */
+['/gantt.md', 'js//events.js', 'a\\b', 'gantt.md/', 'docs/深/层/文件.md'].forEach(function (p) {
+  const once = NP(p);
+  check(once !== '' && NP(once) === once, '17e.1 幂等性：NP(NP(p)) === NP(p)　' + p + ' → ' + once);
+});
 
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);
