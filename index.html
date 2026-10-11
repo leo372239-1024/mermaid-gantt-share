@@ -330,7 +330,20 @@
     const logoutBtn = document.getElementById('adminLogout');
     const errEl = document.getElementById('adminErr');
     const okEl = document.getElementById('adminOk');
-    let sessionExpired = false;   /* 因令牌过期而自动唤起登录（用于给出不同文案） */
+    let sessionExpired = false;   /* 因令牌被服务端拒绝而自动唤起登录（用于给出不同文案） */
+    /* 令牌模式：默认假定永不过期；页面会向 /api/health 核对实际配置后覆盖，
+       这样「提示文案」永远与实际生效的 TOKEN_TTL 一致，不会出现
+       「服务端已改配置、页面还在说 12 小时」的错位。 */
+    let tokenNeverExpires = true;
+    let tokenTtlMs = 0;
+
+    /* 把毫秒折算成便于人读的说法（12h → 「12 小时」） */
+    function ttlText() {
+      const m = Math.round(tokenTtlMs / 60000);
+      if (m % 1440 === 0) return (m / 1440) + ' 天';
+      if (m % 60 === 0) return (m / 60) + ' 小时';
+      return m + ' 分钟';
+    }
 
     function refreshState() {
       const logged = Admin.isLoggedIn();
@@ -349,15 +362,29 @@
     }
     function close() { modal.classList.remove('on'); }
 
+    /* 拉取服务端的令牌模式（best-effort：失败就沿用默认的「永不过期」） */
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && typeof j.tokenNeverExpires === 'boolean') {
+          tokenNeverExpires = j.tokenNeverExpires;
+          tokenTtlMs = Number(j.tokenTtlMs) || 0;
+        }
+      })
+      .catch(function () { /* 静默：不影响页面主流程 */ });
+
     /* v42：令牌被服务端拒绝（401）时由 admin.js 回调到这里。
-       场景：令牌 12 小时到期，或管理员口令被改过（换口令会让所有旧令牌立即失效）。
+       场景：① 服务端开了定期过期且令牌已到期；② 管理员口令被改过
+       （换口令会让所有旧令牌立即失效 —— 这是最常遇到的一种）。
        处理：清掉本地令牌（admin.js 已做）→ 刷新按钮态 → 弹出登录框并给出准确说明。
        不自动重载页面：用户输一次口令即可继续，省掉「刷新→找登录入口→再操作」的往返。 */
     Admin.setAuthExpiredHandler(function () {
       sessionExpired = true;
       refreshState();          /* 此时 isLoggedIn() 已为 false，按钮回到「🔒 管理员」 */
       okEl.style.display = 'none';
-      errEl.textContent = '登录已过期（令牌有效期 12 小时；管理员口令变更也会使旧令牌失效）。请重新输入口令。';
+      errEl.textContent = tokenNeverExpires
+        ? '登录已失效（管理员口令被变更，旧令牌随之作废）。请重新输入口令。'
+        : '登录已过期（令牌有效期 ' + ttlText() + '；管理员口令变更也会使旧令牌失效）。请重新输入口令。';
       errEl.style.display = 'block';
       modal.classList.add('on');
       tokenInput.disabled = false;

@@ -966,5 +966,143 @@ check(NP(null) === '' && NP(undefined) === '', '17d.9 null/undefined → 空串�
   check(once !== '' && NP(once) === once, '17e.1 幂等性：NP(NP(p)) === NP(p)　' + p + ' → ' + once);
 });
 
+/* ------------------------------------------------------------------
+   [18] v43 管理员令牌有效期开关（默认永不过期）
+   背景：令牌原本固定 12 小时到期，正在编辑时突然写库失败、要重新输口令，
+   困扰大于收益（本服务只在本机/局域网，不对公网暴露）。
+   现在默认永不过期，但保留 TOKEN_TTL 开关以便日后恢复定期过期。
+
+   实现注记：auth.js 导出 createAuth({password, tokenTtl}) 工厂 +
+   一个读 process.env 的默认实例。测试直接用工厂造任意配置的实例，
+   不必 spawn 子进程 —— 本机沙箱禁止 spawn（spawnSync 报 EBUSY）。
+   ------------------------------------------------------------------ */
+console.log('[18] v43 管理员令牌有效期（默认永不过期 / TOKEN_TTL 开关）');
+{
+  const AuthMod = require(path.join(ROOT, 'server', 'auth.js'));
+  const make = cfg => AuthMod.createAuth(cfg);
+  const PW = 'test-password-for-auth-suite';
+
+  /* 18a. 默认（不设 tokenTtl）→ 永不过期 */
+  const a = make({ password: PW });
+  const ta = a.issue();
+  check(a.neverExpires === true && a.ttlMs === 0,
+    '18a.1 ★ 未设 TOKEN_TTL → 永不过期模式（neverExpires=' + a.neverExpires + ', ttlMs=' + a.ttlMs + '）');
+  check(a.verify(ta) === true, '18a.2 签发的固定令牌立即可用');
+  const pa = ta.split('.');
+  check(pa[0] === AuthMod.PERMANENT_MARK && pa.length === 2 && pa[1].length > 20,
+    '18a.3 固定令牌形状仍是 <标识>.<签名>（标识=' + pa[0] + '，签名长 ' + pa[1].length + '）');
+
+  /* 18b. 关键：固定令牌必须**幂等** —— 多次签发得到同一串。
+     若每次登录都发新串，浏览器会堆积历史令牌，且无法靠比对判断是否同一凭证。 */
+  const setB = new Set();
+  for (let i = 0; i < 12; i++) setB.add(a.issue());
+  check(setB.size === 1, '18b.1 ★ 固定令牌幂等：连签 12 次只得到 1 个不同串（实际 ' + setB.size + ' 个）');
+
+  /* 18c. 换口令 → 旧固定令牌立即失效
+     （这是「永不过期」下唯一的作废通道，必须钉死） */
+  const c = make({ password: 'another-password-xyz' });
+  check(c.verify(ta) === false,
+    '18c.1 ★ 换管理员口令后，永不过期的旧令牌立即失效（唯一作废通道，已验证）');
+  check(c.verify(c.issue()) === true, '18c.2 但新口令自己签发的令牌可用');
+
+  /* 18d. 显式 TOKEN_TTL → 恢复定期过期 */
+  const d = make({ password: PW, tokenTtl: '12h' });
+  const td = d.issue();
+  const headD = Number(td.split('.')[0]);
+  check(d.neverExpires === false && d.ttlMs === 12 * 3600 * 1000,
+    '18d.1 TOKEN_TTL=12h → 恢复 12 小时过期（ttlMs=' + d.ttlMs + '）');
+  check(d.verify(td) === true && Number.isFinite(headD) && headD > Date.now(),
+    '18d.2 12h 模式签发的令牌首段是真实时间戳（约「现在 + 12 小时」）');
+
+  /* 18e. 单位解析：ms / s / m / h / d，以及纯数字按秒 */
+  [['500ms', 500], ['30s', 30000], ['30m', 1800000], ['12h', 43200000],
+   ['7d', 604800000], ['3600', 3600000], ['1.5h', 5400000]].forEach(function (pair, i) {
+    const r = make({ password: PW, tokenTtl: pair[0] });
+    check(r.ttlMs === pair[1],
+      '18e.' + (i + 1) + ' TOKEN_TTL=' + pair[0] + ' → ' + pair[1] + ' 毫秒（实际 ' + r.ttlMs + '）');
+  });
+
+  /* 18f. 非法值一律降级为「永不过期」—— 不因格式写错而把服务意外锁死，
+     也不因写错而意外缩短（安全且可预期的默认） */
+  ['abc', '0', '-5', '12 hours', '  ', '', null, undefined, 'NaN', '12x'].forEach(function (v, i) {
+    const r = make({ password: PW, tokenTtl: v });
+    check(r.ttlMs === 0 && r.neverExpires === true,
+      '18f.' + (i + 1) + ' 非法 TOKEN_TTL=' + JSON.stringify(v) + ' → 降级为永不过期');
+  });
+
+  /* 18g. 反向：服务端配了定期过期时，签名正确的「固定令牌」**不得**被放行
+     （否则「本想过期」的部署会被一个 0 标识的串绕过） */
+  const g12 = make({ password: PW, tokenTtl: '12h' });
+  /* 用同一口令手工构造一个签名完全正确的固定令牌 */
+  const crypto_ = require('crypto');
+  const fixedSig = crypto_.createHmac('sha256',
+    crypto_.createHash('sha256').update('gantt-local|' + PW, 'utf8').digest()
+  ).update(AuthMod.PERMANENT_MARK).digest('base64url');
+  check(g12.verify(AuthMod.PERMANENT_MARK + '.' + fixedSig) === false,
+    '18g.1 ★ 12h 模式下，签名正确的「固定令牌」不予放行（签名对但模式不符 → 拒绝）');
+  /* 反向也要成立：永不过期模式下该固定令牌必须放行 */
+  check(a.verify(AuthMod.PERMANENT_MARK + '.' + fixedSig) === true,
+    '18g.2 永不过期模式下，同一固定令牌正常放行');
+
+  /* 18h. 篡改与畸形输入 */
+  check(a.verify(ta.slice(0, -2) + 'XX') === false, '18h.1 篡改签名 → 拒绝');
+  check(a.verify('noseparator') === false, '18h.2 无分隔符 → 拒绝');
+  check(a.verify('') === false && a.verify(null) === false && a.verify(undefined) === false,
+    '18h.3 空串 / null / undefined → 拒绝（不抛异常）');
+  check(a.verify('.sig') === false, '18h.4 首段为空（".sig"）→ 拒绝');
+  check(a.verify('0.0') === false && a.verify('00.' + fixedSig) === false,
+    '18h.5 ★ 形近串 "0.0" / "00.<正确签名>" 不被当作固定令牌放行（只认精确的 "0"）');
+  /* 过期的时间戳串：签名用旧口令算的，这里换个正确口令重新签一个「过去」的 exp */
+  const pastSig = crypto_.createHmac('sha256',
+    crypto_.createHash('sha256').update('gantt-local|' + PW, 'utf8').digest()
+  ).update('1000000000000').digest('base64url');
+  check(g12.verify('1000000000000.' + pastSig) === false,
+    '18h.6 12h 模式下，过期时间戳（2001 年）的令牌 → 拒绝');
+
+  /* 18i. checkPassword：定长比较、空口令不放行 */
+  const ci = make({ password: PW });
+  check(ci.checkPassword(PW) === true, '18i.1 正确口令通过');
+  check(ci.checkPassword(PW + 'x') === false && ci.checkPassword(PW.slice(0, -1)) === false,
+    '18i.2 长短不一的口令 → 拒绝');
+  check(ci.checkPassword('') === false && ci.checkPassword(null) === false,
+    '18i.3 空 / null 口令 → 拒绝');
+  const noPw = make({ password: '' });
+  check(noPw.hasPassword === false && noPw.checkPassword('') === false && noPw.checkPassword('任意') === false,
+    '18i.4 ★ 未配置口令时不退化为「任意口令都通过」（hasPassword=false，一律拒绝）');
+
+  /* 18j. 默认实例（index.js require 的那个）与工厂的一致性。
+     注意：**单测进程里没有 ADMIN_PASSWORD** —— 口令只写在项目根 .env，
+     由 Docker 注入容器，不进宿主机测试进程。所以这里不断言「默认实例已配置口令」，
+     而是断言两条真正重要的机制：
+       ① 默认实例确实是从 process.env 构造的（环境变量改了，它跟着变）；
+       ② 当前项目配置（.env 未设 TOKEN_TTL）下处于永不过期模式。 */
+  const envPw = process.env.ADMIN_PASSWORD || '';
+  check(AuthMod.hasPassword === !!envPw,
+    '18j.1 默认实例的口令状态与 process.env 一致（env 有口令=' + !!envPw +
+    '，实例 hasPassword=' + AuthMod.hasPassword + '）');
+  check(AuthMod.neverExpires === (AuthMod.parseTtlMs(process.env.TOKEN_TTL) === 0),
+    '18j.2 默认实例的有效期来自 process.env.TOKEN_TTL（当前 neverExpires=' + AuthMod.neverExpires + '）');
+  check(AuthMod.neverExpires === true,
+    '18j.3 ★ 当前项目配置下默认实例为永不过期（.env 未设 TOKEN_TTL）');
+  /* 默认实例无论是否有口令，签发的固定令牌都应自洽 */
+  const t18j = AuthMod.issue();
+  check(AuthMod.verify(t18j) === true && t18j.split('.')[0] === AuthMod.PERMANENT_MARK,
+    '18j.4 默认实例签发的是固定令牌且自洽可用（首段=' + t18j.split('.')[0] + '）');
+  /* 再从 .env 造一个实例，确认「项目实际配置」下口令校验也正常 —— 这才是运行时真实所处的状态 */
+  try {
+    const envTxt = fs.readFileSync(path.join(ROOT, '.env'), 'utf8');
+    const m = /^ADMIN_PASSWORD=(.*)$/m.exec(envTxt);
+    if (m && m[1].trim()) {
+      const real = AuthMod.createAuth({ password: m[1].trim(), tokenTtl: null });
+      check(real.hasPassword === true && real.checkPassword(m[1].trim()) === true,
+        '18j.5 ★ 用项目 .env 里的真实口令构造实例 → 口令校验通过、模式为永不过期');
+    } else {
+      console.log('  – 18j.5 跳过：项目根 .env 里没有 ADMIN_PASSWORD');
+    }
+  } catch (e) {
+    console.log('  – 18j.5 跳过：读不到项目根 .env（' + (e && e.message) + '）');
+  }
+}
+
 console.log(failures ? '\n结果：' + failures + ' 项失败 ❌' : '\n结果：全部通过 ✅');
 process.exit(failures ? 1 : 0);

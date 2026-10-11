@@ -160,7 +160,13 @@ const server = http.createServer(async function (req, res) {
   try {
     /* --- 健康检查（compose healthcheck 用） --- */
     if (pathname === '/api/health') {
-      return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
+      return sendJson(res, 200, {
+        ok: true,
+        time: new Date().toISOString(),
+        /* 便于运维确认令牌模式：neverExpires=true 表示永不过期 */
+        tokenTtlMs: auth.ttlMs,
+        tokenNeverExpires: auth.neverExpires
+      });
     }
 
     /* --- 管理员登录：口令换令牌 --- */
@@ -282,6 +288,9 @@ const server = http.createServer(async function (req, res) {
     console.log('[server] 局域网访问 → http://<本机IP>:' + PORT);
     console.log('[server] 静态目录 → ' + SITE_DIR);
     console.log('[server] 管理员口令 → ' + (auth.hasPassword ? '已配置' : '未配置（无法登录）'));
+    console.log('[server] 令牌有效期 → ' + (auth.neverExpires
+      ? '永不过期（TOKEN_TTL 未设置或为 0）'
+      : Math.round(auth.ttlMs / 60000) + ' 分钟（TOKEN_TTL=' + process.env.TOKEN_TTL + '）'));
   });
 })().catch(function (e) {
   console.error('[server] 启动失败：', e);

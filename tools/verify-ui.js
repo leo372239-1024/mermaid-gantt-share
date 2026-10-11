@@ -1200,9 +1200,45 @@ function fracOfOr(hm, fallback) { const f = fracOf(hm); return f === null ? fall
           const e = document.getElementById('adminErr');
           return (e && e.style.display !== 'none') ? e.textContent : '';
         });
-        check(errTxt.indexOf('登录已过期') >= 0, '登录框里给出准确原因（实际「' + errTxt + '」）');
+        /* 文案随令牌模式而变（v43）：
+           永不过期模式 → 「登录已失效（管理员口令被变更，旧令牌随之作废）」
+           定期过期模式 → 「登录已过期（令牌有效期 X；…）」
+           两种都必须明确指向「请重新输入口令」，否则用户不知道该做什么。 */
+        check(/登录已(失效|过期)/.test(errTxt) && /重新输入口令/.test(errTxt),
+          '登录框里给出准确原因（实际「' + errTxt + '」）');
+
+        /* 先确认「那次未授权的写入确实被挡住了」——必须在重新登录之前查，
+           否则 401 的前提（令牌无效）已被下一步的重登改变。 */
         check((await apiGet('gantt.md', tk)).text.indexOf('E2E 过期令牌样本') < 0,
           '未授权的那次写入没有落到后端（401 被正确拦截）');
+
+        /* 8) v43：永不过期令牌（本项目默认模式）
+           服务端 /api/health 会声明 tokenNeverExpires；页面据此调整文案。
+           这里验证「服务端声明的模式」与「令牌实际形态」一致：
+             a. health 说永不过期 → 令牌首段是 '0'（固定令牌，不含时间戳）
+             b. 用真实口令重新登录 → 拿到固定令牌、能继续操作（「失效后可自救」这条路是通的） */
+        const hRes = await fetch(new URL('api/health', URL_).href, { cache: 'no-store' });
+        const hJson = await hRes.json();
+        check(hJson.tokenNeverExpires === true && Number(hJson.tokenTtlMs) === 0,
+          '★ /api/health 声明令牌永不过期（tokenNeverExpires=' + hJson.tokenNeverExpires +
+          ', tokenTtlMs=' + hJson.tokenTtlMs + '）');
+        check(tk.split('.')[0] === '0',
+          '★ 登录拿到的令牌是固定令牌（首段=' + JSON.stringify(tk.split('.')[0]) + '，不含时间戳 → 天然不过期）');
+
+        /* 在页面上用真实口令重新登录，确认「失效后可自救」这条路是通的 */
+        await p4.fill('#adminToken', pwd);
+        await p4.click('#adminSave');
+        await p4.waitForTimeout(1500);
+        const relogged = await p4.evaluate(() => {
+          try { return localStorage.getItem('gantt_admin_token') || ''; } catch (e) { return ''; }
+        });
+        check(relogged.split('.')[0] === '0',
+          '重新登录成功并拿到固定令牌（首段=' + JSON.stringify((relogged || '').split('.')[0]) + '）');
+        const modalClosed = await p4.evaluate(() => {
+          const m = document.getElementById('adminModal');
+          return !m || !m.classList.contains('on');
+        });
+        check(modalClosed, '登录成功后登录框自动关闭（无需手动关）');
       } finally {
         await p4.close().catch(() => {});
         /* 兜底：无论走到哪一步，都把 gantt.md 还原为自检前的原文，保证零残留

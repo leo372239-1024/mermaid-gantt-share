@@ -482,10 +482,11 @@
   function isLoggedIn() { return !!getToken(); }
 
   /* 令牌被服务端拒绝（401）时的回调。
-     为什么要它：令牌有 12 小时有效期，且**换管理员口令会让所有已发出的令牌立即失效**
-     （签名密钥由口令派生）。没有这个出口时，用户只会看到一个「未登录或登录已过期」的报错，
-     不知道该重新登录 —— 页面看起来还是登录态，工具条上还有「＋ 新增」。
-     绑定的动作是「清掉本地令牌 + 提示并唤起登录弹窗」，见 index.html 的 onAuthExpired。 */
+     为什么要它：**换管理员口令会让所有已发出的令牌立即失效**（签名密钥由口令派生）；
+     若服务端开了定期过期（TOKEN_TTL），令牌本身也可能到期。没有这个出口时，
+     用户只会看到一个「未登录或登录已过期」的报错，不知道该重新登录 ——
+     页面看起来还是登录态，工具条上还有「＋ 新增」。
+     绑定的动作是「清掉本地令牌 + 提示并唤起登录弹窗」，见 index.html 的 setAuthExpiredHandler。 */
   var authExpiredHandler = null;
   function setAuthExpiredHandler(fn) { authExpiredHandler = (typeof fn === 'function') ? fn : null; }
   function notifyAuthExpired() {
