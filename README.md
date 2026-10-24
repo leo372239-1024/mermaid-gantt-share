@@ -65,13 +65,32 @@ docker compose ps                # 看状态
 
 ### 开机自启动
 
-三层保障：
+四层保障，按可靠性排序：
 
-1. **容器 `restart: unless-stopped`** —— Docker 引擎一启动，容器自动拉起；
-2. **Docker Desktop 的「登录时启动」**（本机已开启，`settings-store.json` 里 `AutoStart: true`）；
-3. **启动文件夹兜底**：`%APPDATA%\...\Startup\MermaidGanttAutoStart.vbs` —— 登录后静默执行 `tools\local-up.cmd`（先等 Docker 引擎就绪，再 `docker compose up -d`），覆盖「Docker 启动慢」或「曾被 `docker compose down` 停过」的情况。
+1. **容器 `restart: always`** —— ⭐ **主力**。Docker 引擎每次启动（= 每次开机）都会无条件恢复这两个容器，**包括此前被手动停过的情况**。
+   > 这里必须用 `always` 而不是 `unless-stopped`。`unless-stopped` 的语义是「被手动停过的容器，即使守护进程重启也不拉起」——
+   > 2026-10-14 00:02 一次手动停止，导致此后 10-14、10-15 两次开机都没能自动启动。这正是本次故障的第一层原因。
+2. **计划任务 `MermaidGanttShare-Local`** —— 登录后 +30 秒，以 `cmd.exe /c tools\local-up.cmd` 拉起（**不经 Windows 脚本宿主、不经启动文件夹**）。
+   注册一次即可：双击 `tools\install-autostart.cmd`。查看/手动执行：
+   ```powershell
+   Get-ScheduledTask   -TaskName MermaidGanttShare-Local
+   Start-ScheduledTask -TaskName MermaidGanttShare-Local
+   ```
+3. **Docker Desktop 的「登录时启动」**（本机已开启，`settings-store.json` 里 `AutoStart: true`）。
+4. **启动文件夹兜底**：`%APPDATA%\...\Startup\MermaidGanttAutoStart.vbs` —— 登录后静默执行 `tools\local-up.cmd`。
+   ⚠️ 这一层**单独不可靠**：实测该脚本在登录后约 3.5 分钟才被触发，且本次开机时整条链路静默失败（未产生任何 `docker` 调用）；
+   火绒 HIPS 会把「启动文件夹里的脚本自启」记为 `fp_name_touch_startup_malware`（`file_prot_v6`，risk 3）。仅作冗余。
 
-换机 / 重装时执行 `tools\install-autostart.cmd` 重新安装自启项，`tools\uninstall-autostart.cmd` 移除。
+`tools\local-up.cmd` 每次运行都会把过程追加到 **`logs\autostart.log`**（已 gitignore）——
+**自启出问题时先看这个文件**，它会记录工作目录、`docker` 路径、等待引擎的重试次数、`docker compose up -d` 的原始输出与退出码。
+
+换机 / 重装：`tools\install-autostart.cmd` 安装，`tools\uninstall-autostart.cmd` 移除（只移除触发器，不会停正在跑的服务）。
+
+> 2026-10-15 排障结论（供日后参考）：
+> ① `restart: unless-stopped` 无法复活「被手动停过」的容器 —— 已改 `always`；
+> ② 启动文件夹 VBS 链路在登录 3.5 分钟后才触发，且本次静默失败（火绒日志显示脚本确实被执行，但下游未产生任何 Docker API 调用）；
+> ③ 计划任务兜底此前**从未注册过**（`C:\Windows\System32\Tasks\MermaidGanttShare-Local` 不存在），等于第三层保障一直是空的。
+
 
 ### 局域网访问
 
@@ -131,6 +150,7 @@ docker exec -i gantt-db psql -U gantt -d gantt < backup-20261009.sql
 | 现象 | 处理 |
 |---|---|
 | 页面显示「内置示例」告警 | 服务没起来。`docker compose ps` 看状态，`docker compose logs app` 看日志 |
+| 开机后服务没自动起来 | 先看 `logs\autostart.log`（启动器全程留痕）；再 `Get-ScheduledTask -TaskName MermaidGanttShare-Local` 确认计划任务在册；最后 `docker inspect gantt-app --format '{{.HostConfig.RestartPolicy.Name}}'` 应为 `always` |
 | 保存时报「未登录或登录已过期」 | 令牌有效期 12 小时，重新点「🔒 管理员」输入口令即可 |
 | 保存时报「远端内容已更新（sha 不匹配）」 | 这是并发保护生效：数据在你编辑期间被改过，重新打开详情再存一次即可 |
 | 手机打不开 | ① 是否同一 Wi-Fi；② 是否跑过 `tools\allow-firewall.cmd`；③ IP 是否变了（`tools\local-status.cmd`） |
@@ -161,15 +181,16 @@ docker exec -i gantt-db psql -U gantt -d gantt < backup-20261009.sql
 
 | 文件 | 作用 |
 |---|---|
-| `docker-compose.yml` | 编排 `gantt-db`（PostgreSQL 16）+ `gantt-app`（Node 服务），均 `restart: unless-stopped` |
+| `docker-compose.yml` | 编排 `gantt-db`（PostgreSQL 16）+ `gantt-app`（Node 服务），均 `restart: always`（开机必起，见「开机自启动」） |
 | `server/index.js` | 本地服务主入口：静态托管 + Contents API 兼容层 + `/raw` 资源 + deadlines 现算 + 口令认证 |
 | `server/db.js` + `server/schema.sql` | PostgreSQL 存储层（`files` / `assets` / `revisions` 三张表）与首次种子导入 |
 | `server/gh-api.js` | GitHub Contents API 的本地兼容层（URL 形状与响应字段保持一致） |
 | `server/auth.js` | 管理员口令校验 + 无状态令牌签发（HMAC-SHA256，12 小时有效） |
 | `server/deadlines.js` | 运行期生成 `deadlines.json` / `.ics`，复用 `tools/build-deadlines.js` 的口径 |
 | `.env` | 本地配置：端口 + 口令（**已 gitignore；含口令，勿外传、勿提交**） |
-| `tools/local-up.cmd` / `local-down.cmd` / `local-status.cmd` | 一键启动 / 停止 / 查状态 |
-| `tools/install-autostart.cmd` / `uninstall-autostart.cmd` | 安装 / 移除开机自启（VBS 放进启动文件夹，登录时静默拉起） |
+| `tools/local-up.cmd` / `local-down.cmd` / `local-status.cmd` | 一键启动 / 停止 / 查状态（`local-up.cmd` 同时是自启入口，全程写 `logs/autostart.log`） |
+| `tools/install-autostart.cmd` / `uninstall-autostart.cmd` | 安装 / 移除开机自启（计划任务为主，启动文件夹 VBS 为冗余） |
+| `tools/register-autostart.ps1` / `unregister-autostart.ps1` | 上述自启项的实际注册 / 注销逻辑（任务计划程序，无需管理员） |
 | `tools/allow-firewall.cmd` | 放行入站 TCP 18080（需管理员运行），让局域网手机能访问 |
 | `tools/local-push.mjs` | 把本地文件整份写回数据库（批量改代码时用） |
 

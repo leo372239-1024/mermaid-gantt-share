@@ -20,7 +20,12 @@ services:
   db:
     image: postgres:16-alpine
     container_name: gantt-db
-    restart: unless-stopped
+    # 用 always 而非 unless-stopped：
+    #   unless-stopped 对「被手动停过」的容器，即使 Docker 守护进程重启（= 每次开机）
+    #   也绝不拉起 —— 2026-10-14 00:02 一次手动停止，导致此后两次开机都没自动启动。
+    #   always 则会在守护进程每次启动时无条件恢复容器，正是「开机自启」需要的语义。
+    #   代价：手动 `docker compose stop` 后，下次开机仍会被拉起（本项目期望如此）。
+    restart: always
     environment:
       POSTGRES_DB: gantt
       POSTGRES_USER: gantt
@@ -42,7 +47,12 @@ services:
       context: ./server
     image: gantt-local-app:latest
     container_name: gantt-app
-    restart: unless-stopped
+    # 用 always 而非 unless-stopped：
+    #   unless-stopped 对「被手动停过」的容器，即使 Docker 守护进程重启（= 每次开机）
+    #   也绝不拉起 —— 2026-10-14 00:02 一次手动停止，导致此后两次开机都没自动启动。
+    #   always 则会在守护进程每次启动时无条件恢复容器，正是「开机自启」需要的语义。
+    #   代价：手动 `docker compose stop` 后，下次开机仍会被拉起（本项目期望如此）。
+    restart: always
     depends_on:
       db:
         condition: service_healthy
